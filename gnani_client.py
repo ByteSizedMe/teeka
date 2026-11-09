@@ -293,26 +293,28 @@ class GnaniClient:
 
 
 if __name__ == "__main__":
-    # python gnani_client.py warm   -> synthesise every caller line into cache/tts
+    # python gnani_client.py warm hi-IN         -> says how many Timbre calls it would make
+    # python gnani_client.py warm hi-IN --yes   -> makes them, into cache/tts
     import sys
 
-    from dotenv import load_dotenv
+    import server  # loads .env and the content packs
 
-    import server  # loads .env and scenarios
-
-    async def warm():
-        load_dotenv(server.ROOT / ".env")
+    async def warm(lang, spend):
         st = server.engine.s
-        if st.mock:
-            sys.exit("No GNANI_API_KEY: nothing to warm.")
         client = server.engine.client
-        for sc in server.CONTENT["scenarios"]:
-            voice, language = server.voice_for(sc["lang"], "caller", st.tts_model)
-            for i, line in enumerate(sc["lines"]):
-                p = await client.tts(line["text"], voice, language, st.tts_model)
-                print(f"{sc['id']} line {i + 1}: {wav_duration(p.read_bytes()):.1f}s")
-        print("Timbre calls made this run:", client.tts_calls)
+        if client is None:
+            sys.exit("No GNANI_API_KEY: nothing to warm.")
+        voice, language = server.voice_for(lang, "caller", st.tts_model)
+        lines = [line["text"] for sc in server.CONTENT["scenarios"] if sc["lang"] == lang for line in sc["lines"]]
+        missing = [t for t in lines if not client.cache_path(t, voice, language, st.tts_model, 24000, 1.0).exists()]
+        print(f"{lang}: {len(lines)} caller lines, {len(missing)} not cached yet = {len(missing)} Timbre calls")
+        if spend:
+            for text in missing:
+                await client.tts(text, voice, language, st.tts_model)
+            print("Timbre calls made this run:", client.tts_calls)
+        else:
+            print("Nothing spent. Add --yes to make these calls.")
         await client.close()
 
-    if sys.argv[1:] == ["warm"]:
-        asyncio.run(warm())
+    if len(sys.argv) >= 3 and sys.argv[1] == "warm":
+        asyncio.run(warm(sys.argv[2], "--yes" in sys.argv))

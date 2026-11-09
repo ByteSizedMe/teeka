@@ -14,6 +14,8 @@ stand-in for a noisy room; it is not a recording of one.
     python test_replies.py --mode rest
     python test_replies.py --snr 10              # add noise at 10 dB signal-to-noise
     python test_replies.py --voice Bhavna        # try another speaker
+    python test_replies.py --lang ta-IN          # another language's test replies
+    python test_replies.py --lang ta-IN --count  # say how many API calls it would make, spend nothing
 """
 import argparse
 import array
@@ -105,37 +107,47 @@ async def main():
     ap.add_argument("--mode", choices=["stream", "rest"])
     ap.add_argument("--model", choices=["prisma-v2.5", "prisma-v3.0"])
     ap.add_argument("--snr", type=float, help="add white noise at this SNR in dB")
-    ap.add_argument("--voice", default="Nalini")
+    ap.add_argument("--voice")
+    ap.add_argument("--lang", default="hi-IN")
+    ap.add_argument("--count", action="store_true", help="print the API calls this would make, and stop")
     args = ap.parse_args()
 
     import server
     from gnani_client import wav_to_pcm
 
+    if args.lang not in server.CONTENT["languages"]:
+        sys.exit(f"Unknown language {args.lang}.")
+    pack = server.CONTENT["languages"][args.lang]
+    phrases = PHRASES if args.lang == "hi-IN" else [tuple(r) for r in pack.get("test_replies", [])]
+    voice = args.voice or ("Nalini" if args.lang == "hi-IN" else pack["voices"]["timbre-v2.5"]["teacher"])
+    if args.count:
+        print(f"{args.lang}: {len(phrases)} replies = up to {len(phrases)} Timbre calls (cached ones are free) and {len(phrases)} Prisma calls.")
+        return 0
     st, client = server.engine.s, server.engine.client
     if client is None:
         sys.exit("No GNANI_API_KEY in .env: this test needs the real API.")
     mode, model = args.mode or st.stt_mode, args.model or st.stt_model
     rng = random.Random(7)
-    print(f"mode={mode} model={model} voice={args.voice} noise={'%g dB SNR' % args.snr if args.snr else 'none'} "
+    print(f"SYNTHETIC SPEECH, not a real person. language={args.lang} mode={mode} model={model} voice={voice} noise={'%g dB SNR' % args.snr if args.snr else 'none'} "
           f"VAD={st.vad_threshold}/{st.vad_min_silence_ms}ms  (synthetic speech, see file header)\n")
 
     rows, lats, mism = [], [], []
-    for n, (phrase, want) in enumerate(PHRASES, 1):
-        english = n == 10
-        voice, tts_lang = ("Poorvi", "hi-en") if english else (args.voice, "hi-IN")
-        path = await client.tts(phrase, voice, tts_lang, "timbre-v2.5", sample_rate=16000)
+    for n, (phrase, want) in enumerate(phrases, 1):
+        english = args.lang == "hi-IN" and n == 10
+        speaker, tts_lang = ("Poorvi", "hi-en") if english else (voice, args.lang)
+        path = await client.tts(phrase, speaker, tts_lang, "timbre-v2.5", sample_rate=16000)
         pcm, rate = wav_to_pcm(path.read_bytes())
         assert rate == 16000
         if args.snr:
             pcm = add_noise(pcm, args.snr, rng)
         try:
             if mode == "stream":
-                heard, ms = await via_stream(client, to_frames(pcm), "hi-IN", model, st.vad_threshold, st.vad_min_silence_ms)
+                heard, ms = await via_stream(client, to_frames(pcm), args.lang, model, st.vad_threshold, st.vad_min_silence_ms)
             else:
-                heard, ms = await client.transcribe(pcm, "hi-IN", model)
+                heard, ms = await client.transcribe(pcm, args.lang, model)
         except Exception as e:
             heard, ms = f"<error: {e}>", None
-        got = classifier.classify(heard, "hi-IN")
+        got = classifier.classify(heard, args.lang)
         ok = got == want
         if ms is not None:
             lats.append(ms)
@@ -146,7 +158,7 @@ async def main():
               f"  said: {phrase}\n{'':32}heard: {heard}")
 
     score = sum(rows)
-    print(f"\nSCORE: {score}/20   (report target: 18 or better)")
+    print(f"\nSCORE ({args.lang}, synthetic speech): {score}/{len(phrases)}   (report target: 90% or better)")
     if lats:
         print(f"MEDIAN LATENCY: {int(statistics.median(lats))} ms "
               f"({'Prisma-reported, per segment' if mode == 'stream' else 'wall clock, REST'}), "
@@ -155,7 +167,7 @@ async def main():
     for n, phrase, heard, want, got in mism:
         print(f"MISMATCH #{n}: wanted {want}, got {got}. Prisma printed: {heard!r}")
     await client.close()
-    return 0 if score >= 18 else 1
+    return 0 if score >= 0.9 * len(phrases) else 1
 
 
 if __name__ == "__main__":

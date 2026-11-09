@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import classifier
+import content
 from gnani_client import GnaniClient, GnaniError, wav_duration
 from listener import CallListener
 
@@ -36,13 +37,16 @@ BOOSTER_DAYS = 3  # after a miss
 NEXT_SCAM_DAYS = 7  # after a pass
 RING_TIMEOUT_S = 45
 MAX_REPLY_CHARS = 500
-MAX_LINES = 3
 
 STAMPS = {"protected": "Protected", "missed": "Needs another dose"}
 VERDICT_LABELS = {
     classifier.COMPLYING: "Started to share",
     classifier.REFUSING: "Said no",
     classifier.UNSURE: "Unclear",
+}
+PHONE_PROBLEMS = {
+    "mic": "The phone's microphone did not start, so replies cannot be heard. Allow it and use the https link.",
+    "sound": "The phone could not play the voice, so it showed the words instead.",
 }
 
 
@@ -112,31 +116,26 @@ def load_settings(env=None) -> Settings:
 
 
 # ----------------------------------------------------------------------- content
-def load_content():
-    data = json.loads((ROOT / "scenarios.json").read_text(encoding="utf-8"))
-    data["by_id"] = {s["id"]: s for s in data["scenarios"]}
-    return data
+CONTENT = content.load()
+SURPRISE = "surprise"
 
 
-CONTENT = load_content()
+def lang_pack(lang: str) -> dict:
+    return CONTENT["languages"][lang]
 
 
-def next_scenario_id(current_id: str) -> str:
-    cur = CONTENT["by_id"][current_id]
-    same = [s["id"] for s in CONTENT["scenarios"] if s["lang"] == cur["lang"]]
-    return same[(same.index(current_id) + 1) % len(same)]
+def scenarios_in(lang: str) -> list:
+    return [s["id"] for s in CONTENT["scenarios"] if s["lang"] == lang]
 
 
 def voice_for(lang: str, role: str, tts_model: str) -> tuple[str, str]:
     """(voice, language) for a caller/teacher line. Voices belong to one model."""
-    v = CONTENT["voices"][lang]
-    if tts_model == "timbre-v3.0":
-        return CONTENT["voices_v3"][role], v["language"]
-    return v[role], v["language"]
+    v = lang_pack(lang)["voices"]
+    return v[tts_model][role], v["language"]
 
 
 def teacher_text(kind: str, scenario: dict, line_idx: int, with_code_word: bool) -> str:
-    t = CONTENT["templates"][scenario["lang"]]
+    t = lang_pack(scenario["lang"])["templates"]
     if kind == "reveal":
         parts = [t["reveal_intro"], scenario["lines"][line_idx]["lesson"], t["reveal_outro"]]
     elif kind == "praise":
@@ -148,6 +147,11 @@ def teacher_text(kind: str, scenario: dict, line_idx: int, with_code_word: bool)
     return " ".join(parts)
 
 
+def flag_public(flag: str, lang: str) -> dict:
+    english = CONTENT["languages"].get("en-IN", {}).get("red_flags", {}).get(flag, flag)
+    return {"id": flag, "en": english, "local": lang_pack(lang)["red_flags"].get(flag, english)}
+
+
 # ------------------------------------------------------------------------ engine
 class Engine:
     def __init__(self, settings: Settings, results_path: Path, client=None, cache_dir: Path | None = None):
@@ -156,6 +160,7 @@ class Engine:
         self.client = client if client is not None else (
             None if settings.mock else GnaniClient(settings.api_key, self.cache_dir))
         self.listener: CallListener | None = None
+        self.lines = content.PackLineSource(CONTENT["languages"])
         self.runtime_notices: list[str] = []
         self._listen_task: asyncio.Task | None = None
         self._prewarm_task: asyncio.Task | None = None
@@ -210,7 +215,7 @@ class Engine:
         old, self.phone = self.phone, ws
         if old is not None and old is not ws:
             try:
-                await old.close()
+                await old.close(code=4001)  # tells that page not to reconnect and take the line back
             except Exception:
                 pass
         await self._send({"type": "config", **self.s.public()})
@@ -223,8 +228,9 @@ class Engine:
             self.phone = None
 
     async def _send_ring(self) -> None:
-        sc = CONTENT["by_id"][self.drill["scenario_id"]]
-        await self._send({"type": "ring", "caller_id": sc["caller_id"], "lang": sc["lang"]})
+        d = self.drill
+        sc = CONTENT["by_id"][d["scenario_id"]]
+        await self._send({"type": "ring", "caller_id": d["caller_id"], "lang": sc["lang"], "labels": lang_pack(sc["lang"])["phone"]})
 
     # ---- drill lifecycle ----
     def public_drill(self) -> dict | None:
@@ -234,26 +240,55 @@ class Engine:
         sc = CONTENT["by_id"][d["scenario_id"]]
         return {
             "id": d["id"], "name": d["name"], "scenario_id": d["scenario_id"],
-            "title": sc["title"], "caller_id": sc["caller_id"], "lang": sc["lang"],
+            "title": sc["title"], "caller_id": d["caller_id"], "lang": sc["lang"],
             "status": d["status"], "ending": d["ending"], "outcome": d["outcome"],
-            "stamp": STAMPS.get(d["outcome"]), "line": d["line_idx"] + 1,
+            "stamp": STAMPS.get(d["outcome"]), "stamp_local": lang_pack(sc["lang"])["stamps"].get(d["outcome"]), "line": max(1, d["turn"]), "turn_limit": sc["turn_limit"],
+            "draft_language": lang_pack(sc["lang"])["review"] == "draft",
             "teacher_label": d["teacher_label"],
             "transcript": d["transcript"],
-            "flags": [
-                {"id": f, "en": CONTENT["red_flags"][f]["en"], "hi": CONTENT["red_flags"][f]["hi"]}
-                for f in d["flags"]
-            ],
+            "flags": [flag_public(f, sc["lang"]) for f in d["flags"]],
         }
 
-    async def start(self, scenario_id: str, name: str) -> dict:
+    def _rows_for(self, name: str, lang: str) -> list:
+        return [r for r in self.read_results() if r["name"] == name and r.get("lang") == lang and r.get("scenario_id") in CONTENT["by_id"]]
+
+    def choose_dose(self, name: str, lang: str, after: str | None = None) -> str:
+        """Which scam next, from this person's results: first anything they last fell for,
+        then types not yet tried (in pack order, after `after`), then the least recent."""
+        everything = scenarios_in(lang)
+        pool = everything
+        if after in everything:
+            cut = everything.index(after) + 1
+            pool = (everything[cut:] + everything[:cut - 1]) or [after]
+        last: dict[str, str] = {}
+        for r in self._rows_for(name, lang):
+            last.pop(r["scenario_id"], None)  # re-insert, so the dict runs oldest first
+            last[r["scenario_id"]] = r["outcome"]
+        for sid, outcome in last.items():
+            if outcome == "missed" and sid in pool:
+                return sid
+        for sid in pool:
+            if sid not in last:
+                return sid
+        return next((sid for sid in last if sid in pool), pool[0])
+
+    async def start(self, scenario_id: str, name: str, lang: str | None = None) -> dict:
+        name = (name or "").strip()[:40] or "Family"
+        if scenario_id == SURPRISE:
+            if not scenarios_in(lang or ""):
+                raise HTTPException(404, "Choose a language first")
+            scenario_id = self.choose_dose(name, lang)
         if scenario_id not in CONTENT["by_id"]:
             raise HTTPException(404, "Unknown scenario")
+        scenario = CONTENT["by_id"][scenario_id]
+        seed = sum(r.get("scenario_id") == scenario_id for r in self.read_results() if r["name"] == name)
+        plan = self.lines.plan(scenario, seed)
         async with self._lock:
             if self.drill and self.drill["status"] in ("ringing", "active"):
                 raise HTTPException(409, "A practice call is already in progress")
             self.drill = {
                 "id": uuid.uuid4().hex[:8], "scenario_id": scenario_id,
-                "name": (name or "").strip()[:40] or "Family",
+                "name": name, "seed": seed, "caller_id": plan["caller_id"], "plan": plan["lines"], "turn": 0,
                 "status": "ringing", "line_idx": 0, "awaiting": False,
                 "transcript": [], "flags": [], "outcome": None, "ending": None,
                 "teacher_label": "Teacher",
@@ -265,15 +300,14 @@ class Engine:
             if self._family is None:
                 self._family_tried = False  # retry the family voice each drill until it works
             if self.client is not None:  # live: have the caller's voice ready before they answer
-                self._prewarm_task = asyncio.create_task(self._prewarm(scenario_id))
+                self._prewarm_task = asyncio.create_task(self._prewarm(scenario["lang"], plan["lines"]))
         await self._send_ring()
         return self.public_drill()
 
-    async def _prewarm(self, scenario_id: str) -> None:
-        sc = CONTENT["by_id"][scenario_id]
-        voice, language = voice_for(sc["lang"], "caller", self.s.tts_model)
+    async def _prewarm(self, lang: str, lines: list) -> None:
+        voice, language = voice_for(lang, "caller", self.s.tts_model)
         await asyncio.gather(
-            *(self.client.tts(l["text"], voice, language, self.s.tts_model) for l in sc["lines"]),
+            *(self.client.tts(text, voice, language, self.s.tts_model) for text in lines),
             return_exceptions=True,
         )
 
@@ -396,6 +430,8 @@ class Engine:
             await self.on_reply(text, latency_ms=None)
         elif kind == "silence" and d["status"] == "active":
             await self.on_reply("", latency_ms=None)
+        elif kind == "phone_problem" and msg.get("what") in PHONE_PROBLEMS:
+            self._notice(PHONE_PROBLEMS[msg["what"]])
         elif kind == "playback_start" and self.listener:
             self.listener.playback_start()
         elif kind == "playback_end" and self.listener:
@@ -406,21 +442,23 @@ class Engine:
         if self.listener is not None:
             self.listener.push_frame(frame)
 
-    async def _say_caller(self, idx: int) -> None:
+    async def _say_caller(self, idx: int, opener: str = "") -> None:
         d = self.drill
         sc = CONTENT["by_id"][d["scenario_id"]]
         line = sc["lines"][idx]
-        extra = await self._speak("caller", line["text"], sc["lang"])
+        text = f"{opener} {d['plan'][idx]}".strip()
+        extra = await self._speak("caller", text, sc["lang"])
         if d["status"] != "active":  # hung up while the voice was being made
             return
         if self.listener is not None:  # close the mic gate BEFORE the phone is told to play
             self.listener.gate_close(extra.get("duration", 0.0))
         d["line_idx"], d["awaiting"] = idx, True
-        d["transcript"].append({"who": "caller", "text": line["text"]})
+        d["turn"] += 1
+        d["transcript"].append({"who": "caller", "text": text})
         for f in line["flags"]:
             if f not in d["flags"]:
                 d["flags"].append(f)
-        await self._send({"type": "caller", "idx": idx, "text": line["text"], **extra})
+        await self._send({"type": "caller", "idx": idx, "text": text, **extra})
         if self.listener is not None:
             self._listen_task = asyncio.create_task(self._listen(self.listener))
 
@@ -433,7 +471,8 @@ class Engine:
             d["awaiting"] = False
             sc = CONTENT["by_id"][d["scenario_id"]]
             verdict = classifier.classify(text, sc["lang"])
-            shown = classifier.mask_for_display(text) if text.strip() else "(no reply)"
+            cue = classifier.unsure_reason(text, sc["lang"]) if verdict == classifier.UNSURE else None
+            shown = classifier.mask_for_display(text, sc["lang"]) if text.strip() else "(no reply)"
             del text  # the raw words are never kept
             if latency_ms is not None:
                 self.latencies.append(int(latency_ms))
@@ -443,8 +482,10 @@ class Engine:
             await self._finish("missed", outcome="missed", teacher="reveal")
         elif verdict == classifier.REFUSING:
             await self._finish("refused", outcome="protected", teacher="praise")
-        elif idx + 1 < MAX_LINES:
-            await self._say_caller(idx + 1)
+        elif d["turn"] < sc["turn_limit"] and (idx if cue == "repeat" else idx + 1) < len(sc["lines"]):
+            # Unsure: answer what they said, then press on (or say the same thing again).
+            opener = self.lines.opener(sc["lang"], cue, d["seed"] + d["turn"])
+            await self._say_caller(idx if cue == "repeat" else idx + 1, opener)
         else:
             await self._finish("wrap", outcome="protected", teacher="wrap")
 
@@ -469,9 +510,10 @@ class Engine:
         if outcome == "missed":
             nxt = {"kind": "booster", "scenario_id": sc["id"], "days": BOOSTER_DAYS}
         else:
-            nxt = {"kind": "next_scam", "scenario_id": next_scenario_id(sc["id"]), "days": NEXT_SCAM_DAYS}
+            nxt = {"kind": "next_scam", "scenario_id": self.choose_dose(d["name"], sc["lang"], after=sc["id"]), "days": NEXT_SCAM_DAYS}
         nxt["due"] = (datetime.now().date() + timedelta(days=nxt["days"])).isoformat()
         nxt["title"] = CONTENT["by_id"][nxt["scenario_id"]]["title"]
+        nxt["lang"] = sc["lang"]
         self._store({
             "id": d["id"], "ts": datetime.now().isoformat(timespec="seconds"),
             "name": d["name"], "scenario_id": sc["id"], "lang": sc["lang"],
@@ -484,7 +526,7 @@ class Engine:
         return int(statistics.median(self.latencies)) if self.latencies else None
 
     def notices(self) -> list:
-        out = list(self.s.warnings) + list(self.runtime_notices)
+        out = list(self.s.warnings) + list(CONTENT["warnings"]) + list(self.runtime_notices)
         return out
 
 
@@ -498,6 +540,7 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 class StartBody(BaseModel):
     scenario_id: str
     name: str = ""
+    lang: str | None = None
 
 
 @app.get("/")
@@ -529,9 +572,18 @@ async def audio(name: str):
 @app.get("/api/scenarios")
 async def scenarios():
     return [
-        {"id": s["id"], "title": s["title"], "title_local": s["title_local"], "lang": s["lang"],
-         "caller_id": s["caller_id"]}
+        {"id": s["id"], "fraud": s["fraud"], "title": s["title"], "title_local": s["title_local"], "lang": s["lang"],
+         "caller_id": s["caller_id"], "practise": s["practise"]}
         for s in CONTENT["scenarios"]
+    ]
+
+
+@app.get("/api/languages")
+async def languages():
+    return [
+        {"lang": code, "name": p["name"], "native_name": p["native_name"], "dir": p.get("dir", "ltr"),
+         "draft": p["review"] == "draft", "scams": len(scenarios_in(code))}
+        for code, p in CONTENT["languages"].items() if scenarios_in(code)
     ]
 
 
@@ -549,7 +601,7 @@ async def state(name: str | None = None):
 
 @app.post("/api/drills")
 async def start_drill(body: StartBody):
-    return await engine.start(body.scenario_id, body.name)
+    return await engine.start(body.scenario_id, body.name, body.lang)
 
 
 @app.post("/api/drills/stop")

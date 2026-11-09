@@ -3,56 +3,75 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teeka family dashboard</title>
+<title>Teeka family card</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;700;800&family=Tiro+Devanagari+Hindi&family=Noto+Sans+Bengali:wght@400;700&family=Noto+Sans+Gujarati:wght@400;700&family=Noto+Sans+Gurmukhi:wght@400;700&family=Noto+Sans+Kannada:wght@400;700&family=Noto+Sans+Malayalam:wght@400;700&family=Noto+Sans+Tamil:wght@400;700&family=Noto+Sans+Telugu:wght@400;700&display=swap">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="wrap">
   <header class="top">
-    <h1>Teeka</h1>
-    <span id="modePill" class="pill">…</span>
-    <span id="phonePill" class="pill">Phone: not connected</span>
-    <span id="latency" class="muted"></span>
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+      <div>
+        <h1>Teeka <span lang="hi">टीका</span></h1>
+        <p class="kicker">Scam-call vaccination card</p>
+      </div>
+    </div>
+    <div class="meters">
+      <span id="modePill" class="pill">…</span>
+      <span id="phonePill" class="pill off">Phone: not connected</span>
+      <span id="latency" class="muted"></span>
+    </div>
   </header>
   <div id="notices"></div>
 
   <div class="grid">
-    <section class="card">
+    <section class="card start">
       <h2>Start a practice call</h2>
       <label for="name">Who is practising?</label>
       <input id="name" maxlength="40" placeholder="e.g. Kamla" autocomplete="off">
+      <label for="language">Their language</label>
+      <select id="language"></select>
+      <p id="draftTag" class="draft" hidden>Draft language: needs a native speaker's check</p>
       <label for="scenario">Scam</label>
       <select id="scenario"></select>
+      <p id="practise" class="muted"></p>
       <div class="row">
         <button id="start" class="primary">Start practice call</button>
         <button id="stop" disabled>Cancel call</button>
       </div>
-      <p id="startMsg" class="muted"></p>
-      <p class="muted">Open <b>/call</b> on the phone and tap “Set up this phone”. The person has agreed in advance to practice calls; stop if a call upsets them.</p>
+      <p id="startMsg"></p>
+      <p class="muted consent">Open <b>/call</b> on the phone and tap “Set up this phone”. The person has agreed in advance to practice calls; stop if a call upsets them.</p>
     </section>
 
-    <section class="card">
-      <h2>Live call</h2>
+    <section class="card live">
+      <h2>Live call <span id="liveDraft" class="draft" hidden>Draft language</span></h2>
       <div id="status" class="muted">No call yet.</div>
       <div id="chips" class="chips"></div>
       <div id="stampBox"></div>
       <div id="transcript" class="transcript"></div>
     </section>
 
-    <section class="card full">
+    <section class="card full record">
       <h2>Teeka card <span id="cardName" class="muted"></span></h2>
       <div id="dots" class="dots"></div>
+      <p class="legend"><span><i class="p"></i>Protected</span><span><i class="m"></i>Needs another dose</span></p>
       <div id="cardSummary" class="muted"></div>
-      <div id="nextDose" style="margin:8px 0;font-weight:600"></div>
+      <div id="nextDose"></div>
       <table id="history"><thead><tr><th>Date</th><th>Scam</th><th>Result</th></tr></thead><tbody></tbody></table>
     </section>
   </div>
+  <p class="foot">Role-played demo. All names, numbers and organisations are fictional.</p>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-let scenarios = [];
+let scenarios = [], languages = [], phoneConnected = false, lastCard = '';
+const DOSE_SLOTS = 8;
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -61,80 +80,175 @@ async function api(path, opts) {
 }
 
 async function init() {
-  scenarios = await api('/api/scenarios');
-  for (const s of scenarios) {
-    const o = el('option', null, `${s.title} (${s.lang === 'hi-IN' ? 'Hindi' : 'English'})`);
-    o.value = s.id;
-    $('scenario').append(o);
+  [languages, scenarios] = await Promise.all([api('/api/languages'), api('/api/scenarios')]);
+  for (const l of languages) {
+    const o = el('option', null, l.name === l.native_name ? l.name : `${l.native_name} · ${l.name}`);
+    o.value = l.lang;
+    $('language').append(o);
   }
-  try { $('name').value = localStorage.getItem('teeka-name') || ''; } catch (e) {}
-  $('start').onclick = async () => {
-    $('startMsg').textContent = '';
-    try {
-      try { localStorage.setItem('teeka-name', $('name').value); } catch (e) {}
-      await api('/api/drills', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenario_id: $('scenario').value, name: $('name').value }) });
-    } catch (e) { $('startMsg').textContent = e.message; }
-    refresh();
-  };
+  try {
+    $('name').value = localStorage.getItem('teeka-name') || '';
+    const saved = localStorage.getItem('teeka-lang');
+    if (languages.some((l) => l.lang === saved)) $('language').value = saved;
+  } catch (e) {}
+  $('language').onchange = fillScams;
+  $('scenario').onchange = showPractise;
+  fillScams();
+  $('start').onclick = startDrill;
   $('stop').onclick = async () => { await api('/api/drills/stop', { method: 'POST' }); refresh(); };
   refresh();
   setInterval(refresh, 700);
 }
 
+function fillScams() {
+  const lang = $('language').value, mine = scenarios.filter((s) => s.lang === lang);
+  const surprise = el('option', null, 'Surprise me (chosen from their results)');
+  surprise.value = 'surprise';
+  $('scenario').replaceChildren(surprise, ...mine.map((s) => {
+    const o = el('option', null, s.title === s.title_local ? s.title : `${s.title} · ${s.title_local}`);
+    o.value = s.id;
+    return o;
+  }));
+  if (mine.length) $('scenario').value = mine[0].id;
+  const pack = languages.find((l) => l.lang === lang);
+  $('draftTag').hidden = !(pack && pack.draft);
+  try { localStorage.setItem('teeka-lang', lang); } catch (e) {}
+  showPractise();
+}
+
+function showPractise() {
+  const s = scenarios.find((x) => x.id === $('scenario').value);
+  $('practise').textContent = s ? `Practises saying no to: ${s.practise}` : 'Teeka picks what they fell for last, then scams not yet tried.';
+}
+
+async function startDrill() {
+  $('startMsg').textContent = '';
+  if (!phoneConnected) { $('startMsg').textContent = 'No phone is connected. Open /call on the phone and tap “Set up this phone” first.'; return; }
+  try {
+    try { localStorage.setItem('teeka-name', $('name').value); } catch (e) {}
+    await api('/api/drills', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario_id: $('scenario').value, name: $('name').value, lang: $('language').value }) });
+  } catch (e) { $('startMsg').textContent = e.message; }
+  refresh();
+}
+
+// One tap: set the form to the scheduled dose and start it.
+function startDose(nd) {
+  const s = scenarios.find((x) => x.id === nd.scenario_id);
+  if (!s) { $('startMsg').textContent = 'That scam is not available any more.'; return; }
+  $('language').value = s.lang;
+  fillScams();
+  $('scenario').value = s.id;
+  showPractise();
+  startDrill();
+}
+
 const ENDINGS = {
   refused: 'They said no. Well done.', missed: 'Started to share, so the call stopped and the teacher explained.',
   wrap: 'Never decided, and shared nothing.', hangup: 'They hung up.', declined: 'They declined the call.',
-  unanswered: 'Nobody answered.', cancelled: 'Cancelled from the dashboard.',
+  unanswered: 'Nobody answered. Try again tomorrow.', cancelled: 'Cancelled from the dashboard.',
 };
+
+// The page refreshes every 0.7 s. Only add what is new, so animations play once
+// and scrolling is left alone. Returns true if anything was added.
+function syncList(box, items, keyOf, build) {
+  const keys = items.map(keyOf);
+  const have = [...box.children].map((c) => c.dataset.key);
+  const same = have.length <= keys.length && have.every((k, i) => k === keys[i]);
+  if (!same) { box.replaceChildren(); have.length = 0; }
+  for (let i = have.length; i < items.length; i++) {
+    const node = build(items[i]);
+    node.dataset.key = keys[i];
+    box.append(node);
+  }
+  return !same || items.length > have.length;
+}
+
+// Masked digits stand out as dark blocks.
+function maskedText(text) {
+  const s = el('span');
+  text.split(/(•(?:\s*•)*)/).forEach((part, i) => {
+    if (!part) return;
+    if (i % 2) { const m = el('span', 'mask', part); m.title = 'Digits hidden'; s.append(m); } else s.append(part);
+  });
+  return s;
+}
+
+function shortDate(iso) {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function renderCard(c) {
+  const key = JSON.stringify(c);
+  if (key === lastCard) return;
+  lastCard = key;
+  $('cardName').textContent = c.name ? `· ${c.name}` : '';
+  const first = c.doses - c.history.length + 1; // the card shows the latest doses
+  const marks = c.history.map((h, i) => {
+    const x = el('span', 'dot ' + h.outcome, String(first + i));
+    x.title = h.outcome === 'protected' ? 'Protected' : 'Needs another dose';
+    return x;
+  });
+  while (marks.length < DOSE_SLOTS) marks.push(el('span', 'dot empty'));
+  $('dots').replaceChildren(...marks);
+  $('cardSummary').textContent = c.doses ? `${c.doses} dose${c.doses > 1 ? 's' : ''}, ${c.protected} protected` : 'No doses yet.';
+  const nd = c.next_dose;
+  $('nextDose').replaceChildren(...(nd ? [
+    el('span', 'nd-label', 'Next dose due'),
+    el('span', 'nd-date', shortDate(nd.due)),
+    el('span', 'nd-what', nd.kind === 'booster' ? `A booster of “${nd.title}”, in ${nd.days} days` : `“${nd.title}”, in ${nd.days} days`),
+    Object.assign(el('button', 'dose-go', 'Start this dose'), { id: 'startDose', onclick: () => startDose(nd) }),
+  ] : []));
+  const tb = document.querySelector('#history tbody');
+  tb.replaceChildren(...c.history.slice().reverse().map((h) => {
+    const tr = el('tr');
+    tr.append(el('td', null, shortDate(h.ts)), el('td', null, (scenarios.find((s) => s.id === h.scenario_id) || {}).title || h.scenario_id),
+      el('td', null, h.outcome === 'protected' ? 'Protected' : 'Needs another dose'));
+    return tr;
+  }));
+}
 
 function render(st) {
   const cfg = st.config;
   const pill = $('modePill');
   pill.textContent = cfg.mock ? 'Mock mode' : `Live · ${cfg.stt_model} · ${cfg.stt_mode}`;
   pill.className = 'pill' + (cfg.mock ? ' mock' : '');
+  phoneConnected = st.phone_connected;
   $('phonePill').textContent = st.phone_connected ? 'Phone: connected' : 'Phone: not connected';
+  $('phonePill').className = 'pill' + (st.phone_connected ? '' : ' off');
   $('latency').textContent = st.median_latency_ms != null ? `Median Prisma latency: ${st.median_latency_ms} ms` : '';
-  const n = $('notices'); n.replaceChildren(...st.notices.map((t) => el('div', 'notice', t)));
+  syncList($('notices'), st.notices, (t) => t, (t) => el('div', 'notice', t));
 
   const d = st.drill;
   const busy = d && (d.status === 'ringing' || d.status === 'active');
   $('start').disabled = !!busy;
   $('stop').disabled = !busy;
-  $('chips').replaceChildren(...(d ? d.flags.map((f) => el('span', 'chip', `${f.en} · ${f.hi}`)) : []));
-  $('stampBox').replaceChildren();
-  $('transcript').replaceChildren();
+  $('status').dataset.state = d ? d.status : '';
+  $('liveDraft').hidden = !(d && d.draft_language);
+  syncList($('chips'), d ? d.flags : [], (f) => `${d.id}:${f.id}`, (f) => el('span', 'chip', f.en === f.local ? f.en : `${f.en} · ${f.local}`));
+  syncList($('stampBox'), d && d.stamp ? [d] : [], (x) => `${x.id}:${x.outcome}`, (x) => {
+    const s = el('div', 'stamp ' + x.outcome, x.stamp);
+    if (x.stamp_local && x.stamp_local !== x.stamp) s.dataset.local = x.stamp_local; // shown in their language under the English
+    return s;
+  });
   if (!d) { $('status').textContent = 'No call yet.'; }
   else {
-    const label = { ringing: 'Ringing…', active: `On the call (caller line ${d.line} of 3)`, done: 'Call finished. ' + (ENDINGS[d.ending] || '') }[d.status];
+    const label = { ringing: 'Ringing…', active: `On the call (caller line ${d.line} of ${d.turn_limit})`, done: 'Call finished. ' + (ENDINGS[d.ending] || '') }[d.status];
     $('status').textContent = `${d.name} · ${d.title} · ${label}`;
-    if (d.stamp) $('stampBox').append(el('div', 'stamp ' + d.outcome, d.stamp));
-    for (const m of d.transcript) {
-      const box = el('div', 'msg ' + m.who);
-      const who = m.who === 'caller' ? `Caller (${d.caller_id})` : m.who === 'person' ? 'Reply' : d.teacher_label;
-      const head = el('small', null, who);
-      if (m.verdict) { const t = el('span', 'tag', ' · ' + m.verdict); head.append(t); }
-      box.append(head, el('span', null, m.text));
-      $('transcript').append(box);
-    }
-    $('transcript').scrollTop = $('transcript').scrollHeight;
   }
-
-  const c = st.card;
-  $('cardName').textContent = c.name ? `· ${c.name}` : '';
-  $('dots').replaceChildren(...c.history.map((h) => { const x = el('span', 'dot ' + h.outcome); x.title = h.outcome; return x; }));
-  $('cardSummary').textContent = c.doses ? `${c.doses} dose${c.doses > 1 ? 's' : ''}, ${c.protected} protected` : 'No doses yet.';
-  const nd = c.next_dose;
-  $('nextDose').textContent = nd ? (nd.kind === 'booster'
-    ? `Next dose: booster of “${nd.title}” in ${nd.days} days (${nd.due})`
-    : `Next dose: “${nd.title}” in ${nd.days} days (${nd.due})`) : '';
-  const tb = document.querySelector('#history tbody');
-  tb.replaceChildren(...c.history.slice().reverse().map((h) => {
-    const tr = el('tr');
-    tr.append(el('td', null, h.ts.slice(0, 10)), el('td', null, (scenarios.find((s) => s.id === h.scenario_id) || {}).title || h.scenario_id),
-      el('td', null, h.outcome === 'protected' ? 'Protected' : 'Needs another dose'));
-    return tr;
-  }));
+  const added = syncList($('transcript'), d ? d.transcript : [], (m) => `${d.id}:${m.who}:${m.text}`, (m) => {
+    const box = el('div', 'msg ' + m.who);
+    const who = m.who === 'caller' ? `Caller (${d.caller_id})` : m.who === 'person' ? 'Reply' : d.teacher_label;
+    const head = el('small', null, who);
+    if (m.verdict) { const t = el('span', 'tag', m.verdict); t.dataset.v = m.verdict; head.append(t); }
+    const words = maskedText(m.text);
+    words.lang = d.lang; words.dir = 'auto';
+    box.append(head, words);
+    return box;
+  });
+  if (added) $('transcript').scrollTop = $('transcript').scrollHeight;
+  renderCard(st.card);
 }
 
 async function refresh() {

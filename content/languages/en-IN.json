@@ -1,0 +1,303 @@
+{
+ "lang": "en-IN",
+ "name": "English",
+ "native_name": "English",
+ "short": "en",
+ "order": 2,
+ "phone": {
+  "ringLabel": "Incoming call",
+  "declineLabel": "Decline",
+  "answerLabel": "Answer",
+  "endLabel": "End call",
+  "endTitle": "Call ended",
+  "done": "That was only a practice call. Nothing was real, and you are safe.",
+  "cancelled": "The practice call was cancelled."
+ },
+ "red_flags": {
+  "unsolicited": "Unexpected call",
+  "urgency": "Urgency",
+  "threat": "Threat",
+  "asks_otp": "Asks for OTP",
+  "unknown_link": "Unknown link",
+  "remote_app": "Install an app",
+  "asks_pin": "Asks for UPI PIN",
+  "unexpected_parcel": "Unexpected parcel",
+  "upfront_fee": "Money up front",
+  "too_good": "Too good to be true",
+  "asks_card": "Asks for card details",
+  "scan_qr": "Asks you to scan a QR",
+  "emotional": "Plays on emotions",
+  "secrecy": "Tells you to keep it secret"
+ },
+ "lessons": {
+  "scare": "Scaring you on a sudden call is a scammer's first move. Stay calm and hang up.",
+  "otp": "An OTP is only for you. Nobody genuine ever asks for it on a call.",
+  "rush": "When someone rushes you, that is the moment to stop. A real company gives you time to think.",
+  "link": "Never open a link because a caller sent it. It can steal your details.",
+  "app": "Never install an app on a caller's word. It can hand them control of your phone.",
+  "pin": "A UPI PIN only ever sends money. You never need it to receive money.",
+  "parcel": "If you are not expecting a parcel, be suspicious of the call. Ask your family first.",
+  "refund": "If someone says they sent money by mistake, check your own bank app. Usually no money ever came.",
+  "qr": "Scanning a QR code sends money, it never brings money in.",
+  "fee": "A real job or a real loan never asks you to pay first.",
+  "prize": "You cannot win a prize you never entered. It is a trap.",
+  "card": "Never tell anyone your card number, expiry date or CVV.",
+  "invest": "Guaranteed huge returns are always a lie. Ask your family before you invest.",
+  "relative": "If a call says a relative is in trouble, hang up and call that relative yourself, and ask for your secret family word."
+ },
+ "branches": {
+  "confused": [
+   "There is nothing to understand, just follow what I say.",
+   "Don't worry, I will make it simple."
+  ],
+  "asks_what": [
+   "You don't have to do anything, just do as I say."
+  ],
+  "wants_time": [
+   "There is no time, this has to happen now.",
+   "We cannot wait, please."
+  ],
+  "repeat": [
+   "Listen, let me say that again."
+  ]
+ },
+ "openers": [
+  "Hello, this is an important call.",
+  "Good day, please listen carefully."
+ ],
+ "pressers": [
+  "Please hurry.",
+  "There is very little time."
+ ],
+ "keywords": {
+  "negation": "before",
+  "comply": [
+   "the otp is",
+   "otp is",
+   "here is the otp",
+   "here is the code",
+   "here's the code",
+   "the code is",
+   "code is",
+   "reading it out",
+   "reading the code",
+   "reading out",
+   "sending it",
+   "i sent",
+   "sent it",
+   "i have sent",
+   "i will share",
+   "i'll share",
+   "let me tell you",
+   "i'll tell you",
+   "i will tell you",
+   "opening the link",
+   "open the link",
+   "clicking the link",
+   "i opened the link",
+   "downloading the app",
+   "download the app",
+   "installing the app",
+   "entering the pin",
+   "enter my pin",
+   "my pin is",
+   "pin is",
+   "how much",
+   "how much should i send",
+   "how much do i pay",
+   "okay i will",
+   "ok i will",
+   "sure i will",
+   "give me a minute let me read",
+   "scanning",
+   "i will scan",
+   "i'll scan",
+   "scan the code",
+   "i'll pay",
+   "i will pay",
+   "paying now",
+   "card number is",
+   "cvv is",
+   "i will send",
+   "i'll send",
+   "sending the money",
+   "i will return",
+   "i'll return",
+   "send the link"
+  ],
+  "resist": [
+   "who are you",
+   "who is this",
+   "who is calling",
+   "not sharing",
+   "not share",
+   "won't share",
+   "will not share",
+   "not giving",
+   "won't give",
+   "will not give",
+   "not going to",
+   "don't want",
+   "do not want",
+   "hang up",
+   "hanging up",
+   "i'm hanging",
+   "putting the phone down",
+   "call the police",
+   "calling the police",
+   "tell the police",
+   "call my son",
+   "ask my son",
+   "ask my daughter",
+   "go to the bank",
+   "visit the bank",
+   "going to the bank",
+   "call the bank",
+   "scam",
+   "fraud",
+   "cheat",
+   "not interested",
+   "call later",
+   "call back later",
+   "later",
+   "stop calling",
+   "do not call",
+   "don't call",
+   "call him myself",
+   "call her myself",
+   "call them myself",
+   "no money",
+   "not paying",
+   "won't pay",
+   "will not pay"
+  ],
+  "unsure": {
+   "repeat": [
+    "say that again",
+    "say again",
+    "repeat",
+    "pardon",
+    "didn't hear",
+    "did not hear"
+   ],
+   "wants_time": [
+    "wait",
+    "one minute",
+    "give me time",
+    "a moment",
+    "hold on"
+   ],
+   "asks_what": [
+    "what should i do",
+    "what do i do",
+    "what to do"
+   ],
+   "confused": [
+    "don't understand",
+    "do not understand",
+    "what do you mean",
+    "what does that mean",
+    "confused"
+   ]
+  },
+  "negators": [
+   "not",
+   "no",
+   "never",
+   "don't",
+   "dont",
+   "won't",
+   "wont",
+   "can't",
+   "cant",
+   "cannot",
+   "didn't"
+  ],
+  "number_words": {
+   "0": [
+    "zero"
+   ],
+   "1": [
+    "one"
+   ],
+   "2": [
+    "two"
+   ],
+   "3": [
+    "three"
+   ],
+   "4": [
+    "four"
+   ],
+   "5": [
+    "five"
+   ],
+   "6": [
+    "six"
+   ],
+   "7": [
+    "seven"
+   ],
+   "8": [
+    "eight"
+   ],
+   "9": [
+    "nine"
+   ]
+  }
+ },
+ "test_replies": [
+  [
+   "Okay, OTP is 4 7 1 9",
+   "complying"
+  ],
+  [
+   "I am opening the link",
+   "complying"
+  ],
+  [
+   "I am scanning the code",
+   "complying"
+  ],
+  [
+   "I will not share it",
+   "refusing"
+  ],
+  [
+   "who is this",
+   "refusing"
+  ],
+  [
+   "I don't understand",
+   "unsure"
+  ],
+  [
+   "what should I do",
+   "unsure"
+  ]
+ ],
+ "voices": {
+  "language": "en-IN",
+  "timbre-v2.5": {
+   "caller": "Girish",
+   "teacher": "Kaveri"
+  },
+  "timbre-v3.0": {
+   "caller": "Prakash",
+   "teacher": "Shivani"
+  }
+ },
+ "review": "draft",
+ "dir": "ltr",
+ "templates": {
+  "reveal_intro": "Please stop. This was a Teeka practice call. Nothing here was real, and you are safe.",
+  "reveal_outro": "That is all right. Anyone can slip, and that is exactly why we practise. Next time, just hang up and tell your family.",
+  "praise": "Well done! This was a Teeka practice call, and you handled it perfectly. Saying no is the best thing you can do.",
+  "wrap": "This was a Teeka practice call. You did not share anything, and that is good. Remember, if you are unsure, hang up and ask your family.",
+  "code_word": "One more thing: agree on a secret family word. If someone with a familiar voice ever asks you for money or a code, ask for that word first."
+ },
+ "stamps": {
+  "protected": "Protected",
+  "missed": "Needs another dose"
+ }
+}

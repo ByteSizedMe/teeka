@@ -1,5 +1,12 @@
 # Teeka handoff
 
+## Content packs (latest)
+- 15 fraud types in the 10 languages Gnani supports for both Prisma and Timbre, in `content/`. `content.py` validates them at startup.
+- All packs have `"review": "draft"`. A native speaker must check each one, then change it to `native_reviewed`.
+- Hindi and English have two written sentences per beat. The other eight have one, varied by interchangeable opening and closing sentences.
+- Tamil and Telugu callers are female, because Timbre v2.5 lists no male voice preferring those languages.
+- Run `python test_packs.py` as well as the three offline tests. `results.json` from before this change still works.
+
 ## Done (stages 1-8)
 - Classifier, scenarios, keywords: 20/20 report phrases as text.
 - Server, dashboard, phone page: mock mode and live mode. 12 server tests pass.

@@ -2,82 +2,191 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teeka phone</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1316">
+<title>Phone</title>
+<link rel="icon" href="data:,">
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; background: #10151c; color: #fff; font: 18px/1.4 system-ui, "Segoe UI", sans-serif;
-         display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; }
-  h1 { font-size: 2rem; margin: .2em 0; }
-  .sub { color: #aeb7c6; margin: 0 0 1.2rem; }
-  .avatar { width: 110px; height: 110px; border-radius: 50%; background: #2c3645; display: grid; place-items: center; font-size: 3rem; margin-bottom: 12px; }
-  .btns { display: flex; gap: 48px; margin-top: 28px; }
-  .round { width: 84px; height: 84px; border-radius: 50%; border: 0; font-size: 2rem; color: #fff; cursor: pointer; }
-  .green { background: #1fa971; } .red { background: #d3382c; }
-  .big { padding: 16px 28px; font-size: 1.2rem; border-radius: 14px; border: 0; background: #1fa971; color: #fff; cursor: pointer; }
-  .screen { display: none; width: 100%; max-width: 420px; flex-direction: column; align-items: center; }
+  :root { color-scheme: dark; --bg: #0e1316; --surface: #222d34; --text: #ffffff; --soft: #c6d1d8; --mint: #79dfb4; --green: #178050; --red: #c8321f; --line: #4d5b64; --warn: #ffc9bd; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); }
+  html { font-size: 19px; }
+  body { color: var(--text); font: 19px/1.45 system-ui, -apple-system, Roboto, "Noto Sans Devanagari", "Segoe UI", "Nirmala UI", sans-serif; }
+  svg { display: block; fill: currentColor; }
+  h1 { margin: 0; font-weight: 500; line-height: 1.2; }
+  p { margin: 0; }
+  :focus-visible { outline: 3px solid #fff; outline-offset: 4px; }
+
+  .screen { display: none; width: 100%; max-width: 480px; min-height: 100vh; min-height: 100dvh; margin: 0 auto; flex-direction: column; align-items: center; text-align: center;
+            padding: calc(28px + env(safe-area-inset-top)) 24px calc(28px + env(safe-area-inset-bottom)); }
   .screen.on { display: flex; }
-  .ring .avatar { animation: pulse 1s infinite; }
-  @keyframes pulse { 50% { transform: scale(1.08); } }
-  #subtitle { margin: 12px 0; min-height: 3rem; color: #d8dee9; font-size: 1rem; }
-  #mock { display: none; width: 100%; margin-top: 12px; gap: 8px; flex-direction: column; }
+  .middle { margin: auto 0; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .sub { color: var(--soft); font-size: 1.05rem; }
+  .big { min-height: 64px; width: 100%; max-width: 320px; padding: 14px 24px; font: inherit; font-size: 1.2rem; font-weight: 600; border-radius: 32px; border: 0; background: var(--mint); color: #08281c; cursor: pointer; }
+  .big:disabled { background: var(--surface); color: var(--soft); }
+  .mark { width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); color: var(--mint); }
+  .mark svg { width: 50px; height: 50px; }
+  .title { font-size: 2.1rem; }
+  .tag { font-size: .95rem; color: #2a1800; background: #ffc27a; border-radius: 4px; padding: 2px 10px; }
+  .breathe { animation: breathe 3.2s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .55; } }
+
+  /* the call itself: looks like the phone's own call screen, and nothing says it is a drill */
+  .callhead { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding-top: 3dvh; }
+  .label { color: var(--soft); font-size: 1.1rem; }
+  .name { font-size: clamp(2.3rem, 11vw, 3rem); overflow-wrap: anywhere; }
+  .avatar { position: relative; width: 132px; height: 132px; margin: auto 0; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--surface); color: var(--soft); }
+  .avatar svg { width: 76px; height: 76px; }
+  .ring .avatar::before, .ring .avatar::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--mint); animation: ripple 2s ease-out infinite; }
+  .ring .avatar::after { animation-delay: 1s; }
+  @keyframes ripple { from { transform: scale(1); opacity: .7; } to { transform: scale(1.55); opacity: 0; } }
+  .actions { display: flex; justify-content: space-between; width: 100%; max-width: 310px; }
+  .actions.one { justify-content: center; }
+  .action { display: flex; flex-direction: column; align-items: center; gap: 14px; font-size: 1.05rem; }
+  .round { width: 84px; height: 84px; display: grid; place-items: center; border-radius: 50%; border: 0; color: #fff; cursor: pointer; }
+  .round svg { width: 42px; height: 42px; }
+  .green { background: var(--green); animation: glow 1.4s ease-out infinite; }
+  .red { background: var(--red); }
+  .hangup svg { transform: rotate(135deg); }
+  @keyframes glow { from { box-shadow: 0 0 0 0 rgba(121, 223, 180, .6); } to { box-shadow: 0 0 0 11px rgba(121, 223, 180, 0); } }
+  #timer { color: var(--soft); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+  #incall .avatar { margin: 0; }
+  .callbody { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 12px 0; }
+  #subtitle { width: 100%; max-height: 27dvh; overflow-y: auto; color: var(--text); font-size: 1.1rem; line-height: 1.6; }
+  #subtitle:empty { display: none; }
+  #mock { display: none; width: 100%; gap: 8px; flex-direction: column; }
   #mock.on { display: flex; }
-  #mock input { padding: 12px; border-radius: 10px; border: 1px solid #3a4558; background: #1a212c; color: #fff; font-size: 1rem; width: 100%; }
+  #mock input { min-height: 50px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: #fff; font: inherit; width: 100%; }
+  #mock input::placeholder { color: var(--soft); }
   #mock .r { display: flex; gap: 8px; }
-  #mock button { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid #3a4558; background: #243042; color: #fff; font-size: 1rem; }
-  .tag { font-size: .8rem; background: #b4540a; border-radius: 999px; padding: 2px 10px; }
-  #err { color: #ffb4a8; margin-top: 12px; min-height: 1.4rem; font-size: .95rem; }
+  #mock button { flex: 1; min-height: 48px; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: #fff; font: inherit; cursor: pointer; }
+  #err { position: fixed; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top)); z-index: 5; padding: 10px 14px; border-radius: 10px; background: #3b1a14; color: var(--warn); border: 1px solid var(--warn); font-size: 1rem; text-align: center; }
+  #err:empty { display: none; }
+
+  @media (max-height: 720px) {
+    .screen { padding-top: calc(18px + env(safe-area-inset-top)); padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+    .avatar { width: 104px; height: 104px; } .avatar svg { width: 60px; height: 60px; }
+    .callhead { padding-top: 0; }
+    .round { width: 76px; height: 76px; }
+  }
+  /* the typed box is only for mock mode, so make room for it on short screens */
+  @media (max-height: 720px) { #incall:has(#mock.on) .avatar { display: none; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></symbol>
+    <symbol id="i-person" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></symbol>
+  </svg>
+
   <div id="setup" class="screen on">
-    <div class="avatar">☎</div>
-    <h1>Teeka</h1>
-    <p class="sub">Practice calls. Tap once so this phone can ring and listen.</p>
+    <div class="middle">
+      <div class="mark"><svg aria-hidden="true"><use href="#i-shield"/></svg></div>
+      <h1 class="title">Teeka <span lang="hi">टीका</span></h1>
+      <p class="sub">Practice calls. Tap once so this phone can ring and listen.</p>
+    </div>
     <button id="setupBtn" class="big">Set up this phone</button>
   </div>
 
   <div id="waiting" class="screen">
-    <div class="avatar">☎</div>
-    <h1>Ready</h1>
-    <p class="sub">Waiting for a practice call. Keep this page open.</p>
-    <span id="mockTag" class="tag" hidden>Mock mode</span>
+    <div class="middle">
+      <div class="mark breathe"><svg aria-hidden="true"><use href="#i-phone"/></svg></div>
+      <h1 class="title">Ready</h1>
+      <p class="sub">Waiting for a practice call. Keep this page open.</p>
+      <span id="mockTag" class="tag" hidden>Mock mode</span>
+    </div>
   </div>
 
   <div id="ringing" class="screen ring">
-    <div class="avatar">☎</div>
-    <p class="sub">Incoming call</p>
-    <h1 id="callerId"></h1>
-    <div class="btns">
-      <button id="declineBtn" class="round red" aria-label="Decline">✕</button>
-      <button id="answerBtn" class="round green" aria-label="Answer">✆</button>
+    <div class="callhead">
+      <p class="label" id="ringLabel">Incoming call</p>
+      <h1 class="name" id="callerId"></h1>
+    </div>
+    <div class="avatar"><svg aria-hidden="true"><use href="#i-person"/></svg></div>
+    <div class="actions">
+      <div class="action">
+        <button id="declineBtn" class="round red hangup" aria-label="Decline"><svg aria-hidden="true"><use href="#i-phone"/></svg></button>
+        <span id="declineLabel">Decline</span>
+      </div>
+      <div class="action">
+        <button id="answerBtn" class="round green" aria-label="Answer"><svg aria-hidden="true"><use href="#i-phone"/></svg></button>
+        <span id="answerLabel">Answer</span>
+      </div>
     </div>
   </div>
 
   <div id="incall" class="screen">
-    <div class="avatar">☎</div>
-    <h1 id="callerId2"></h1>
-    <p class="sub" id="timer">00:00</p>
-    <div id="subtitle"></div>
-    <div id="mock">
-      <input id="replyText" placeholder="Type what the person says" autocomplete="off">
-      <div class="r"><button id="sendBtn">Send reply</button><button id="silentBtn">Say nothing</button></div>
+    <div class="callhead">
+      <h1 class="name" id="callerId2"></h1>
+      <p id="timer">00:00</p>
     </div>
-    <div class="btns"><button id="endBtn" class="round red" aria-label="End call">✕</button></div>
+    <div class="callbody">
+      <div class="avatar"><svg aria-hidden="true"><use href="#i-person"/></svg></div>
+      <div id="subtitle"></div>
+      <div id="mock">
+        <input id="replyText" placeholder="Type what the person says" aria-label="Type what the person says" autocomplete="off">
+        <div class="r"><button id="sendBtn">Send reply</button><button id="silentBtn">Say nothing</button></div>
+      </div>
+    </div>
+    <div class="actions one">
+      <div class="action">
+        <button id="endBtn" class="round red hangup" aria-label="End call"><svg aria-hidden="true"><use href="#i-phone"/></svg></button>
+        <span id="endLabel">End call</span>
+      </div>
+    </div>
   </div>
 
   <div id="ended" class="screen">
-    <div class="avatar">☎</div>
-    <h1>Call ended</h1>
-    <p class="sub" id="endMsg">That was a practice call. Nothing was real.</p>
+    <div class="middle">
+      <div class="mark"><svg aria-hidden="true"><use href="#i-shield"/></svg></div>
+      <h1 class="title" id="endTitle">Call ended</h1>
+      <p class="sub" id="endMsg">That was only a practice call. Nothing was real, and you are safe.</p>
+    </div>
   </div>
   <div id="err" role="alert"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let ws, cfg = { mock: true }, audioCtx, ringTimer, ringGain, ringOsc = [], micStream, micNode, timerIv, callStart;
-let player = new Audio(), playQueue = [], playing = false, endAfterPlay = false;
+let ws, cfg = { mock: true }, audioCtx, ringTimer, ringGain, ringOsc = [], micStream, micNode, micSrc, micSink, timerIv, callStart;
+let player = new Audio(), playQueue = [], playing = false, endAfterPlay = false, playToken = 0;
+let workletLoaded = false, micToken = 0, endedTimer, wakeLock;
+const MIC_OPTS = { audio: { channelCount: 1, sampleRate: 48000, echoCancellation: false, noiseSuppression: true, autoGainControl: true } };
+
+// 0.1 s of silence. Playing it inside a tap unlocks this <audio> element on phones,
+// so the caller's voice can start later without another tap.
+const SILENCE_URL = (() => {
+  const n = 1600, v = new DataView(new ArrayBuffer(44 + n));
+  const s = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  s(0, 'RIFF'); v.setUint32(4, 36 + n, true); s(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 16000, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); s(36, 'data'); v.setUint32(40, n, true);
+  return URL.createObjectURL(new Blob([v.buffer], { type: 'audio/wav' }));
+})();
+function unlockPlayer() {
+  if (playing) return;
+  player.onended = player.onerror = null;
+  player.src = SILENCE_URL;
+  player.play().catch(() => {});
+}
+function micMessage(e) {
+  if (!window.isSecureContext || !navigator.mediaDevices) return 'The microphone only works over HTTPS. Open the https tunnel link, not the laptop IP.';
+  if (e && e.name === 'NotAllowedError') return 'The microphone is blocked. Allow it for this page in the browser settings, then reload.';
+  return 'Could not start the microphone' + (e && e.name ? ' (' + e.name + ').' : '.');
+}
+async function keepAwake() { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+
+// Replaced on every ring with the labels from that call's language pack.
+let words = { done: 'That was only a practice call. Nothing was real, and you are safe.', cancelled: 'The practice call was cancelled.' };
+function setCallLanguage(labels, lang) {
+  if (!labels) return;
+  words = labels;
+  if (lang) document.documentElement.lang = lang;
+  for (const id of ['ringLabel', 'declineLabel', 'answerLabel', 'endLabel', 'endTitle']) $(id).textContent = labels[id];
+  $('endMsg').textContent = labels.done;
+}
 
 function show(id) { document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('on', s.id === id)); }
 function err(t) { $('err').textContent = t || ''; }
@@ -104,45 +213,63 @@ function stopRing() {
 }
 
 // ---- caller / teacher audio (server sends audio_url once Timbre is on) ----
+function resetAudio() {
+  playToken++; playing = false; endAfterPlay = false; playQueue = [];
+  player.onended = player.onerror = null;
+  player.pause();
+}
 function playNext() {
   if (playing) return;
   const item = playQueue.shift();
   if (!item) { if (endAfterPlay) { endAfterPlay = false; finishCall(); } return; }
   playing = true;
-  player.src = item;
+  const me = ++playToken;
+  player.src = item.url;
   send({ type: 'playback_start' });
-  const done = () => { playing = false; send({ type: 'playback_end' }); playNext(); };
-  player.onended = done; player.onerror = done;
-  player.play().catch(done);
+  const done = () => { if (me !== playToken) return; playing = false; send({ type: 'playback_end' }); playNext(); };
+  const failed = (e) => {
+    if (me !== playToken) return;
+    $('subtitle').textContent = item.text; // the person still gets the words
+    send({ type: 'phone_problem', what: 'sound' });
+    done();
+  };
+  player.onended = done; player.onerror = failed;
+  player.play().catch(failed);
 }
 
-// ---- microphone: 48 kHz capture, worklet resamples to 16 kHz, 1,024-byte frames ----
+// ---- microphone: worklet resamples to 16 kHz and emits 1,024-byte frames ----
 async function startMic() {
   if (cfg.mock) return;
+  const me = ++micToken;
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 48000,
-      echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
-    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
-    await ctx.audioWorklet.addModule('/static/mic-worklet.js');
-    micNode = new AudioWorkletNode(ctx, 'downsampler');
+    const stream = await navigator.mediaDevices.getUserMedia(MIC_OPTS);
+    if (me !== micToken) { stream.getTracks().forEach((t) => t.stop()); return; } // hung up while waiting
+    micStream = stream;
+    if (audioCtx.state !== 'running') await audioCtx.resume();
+    if (!workletLoaded) { await audioCtx.audioWorklet.addModule('/static/mic-worklet.js'); workletLoaded = true; }
+    if (me !== micToken) return;
+    micNode = new AudioWorkletNode(audioCtx, 'downsampler');
     micNode.port.onmessage = (e) => { if (ws && ws.readyState === 1) ws.send(e.data); };
-    const src = ctx.createMediaStreamSource(micStream);
-    src.connect(micNode); // not connected to the speakers
-    micNode.ctx = ctx;
+    micSrc = audioCtx.createMediaStreamSource(micStream);
+    micSink = audioCtx.createGain(); micSink.gain.value = 0; // muted: keeps the worklet running on Safari, never heard
+    micSrc.connect(micNode); micNode.connect(micSink); micSink.connect(audioCtx.destination);
   } catch (e) {
-    err('The microphone is blocked. Open this page over HTTPS (the tunnel link), not the laptop IP.');
+    err(micMessage(e)); send({ type: 'phone_problem', what: 'mic' });
   }
 }
 function stopMic() {
+  micToken++;
   if (micStream) micStream.getTracks().forEach((t) => t.stop());
-  if (micNode) { micNode.port.onmessage = null; try { micNode.ctx.close(); } catch (e) {} }
-  micStream = micNode = null;
+  if (micNode) micNode.port.onmessage = null;
+  [micSrc, micNode, micSink].forEach((n) => { if (n) try { n.disconnect(); } catch (e) {} });
+  micStream = micNode = micSrc = micSink = null;
 }
 
 function finishCall() {
   stopMic(); stopRing(); clearInterval(timerIv);
   show('ended');
-  setTimeout(() => show('waiting'), 6000);
+  clearTimeout(endedTimer);
+  endedTimer = setTimeout(() => { if ($('ended').classList.contains('on')) show('waiting'); }, 6000);
 }
 
 function tick() {
@@ -155,17 +282,18 @@ function onMsg(m) {
     cfg = m; $('mockTag').hidden = !m.mock; $('mock').classList.toggle('on', !!m.mock);
   } else if (m.type === 'ring') {
     $('callerId').textContent = $('callerId2').textContent = m.caller_id;
+    resetAudio(); clearTimeout(endedTimer); setCallLanguage(m.labels, m.lang);
+    if (audioCtx) audioCtx.resume().catch(() => {});
     show('ringing'); startRing(); err('');
   } else if (m.type === 'caller' || m.type === 'teacher') {
-    if (m.audio_url) playQueue.push(m.audio_url);
+    if (m.audio_url) playQueue.push({ url: m.audio_url, text: m.text });
     // Words are shown only when there is no voice (mock mode, or Timbre failed).
     if (cfg.mock || !m.audio_url) $('subtitle').textContent = m.text;
     if (m.audio_url) playNext();
   } else if (m.type === 'end') {
     if (!document.querySelector('#ringing.on, #incall.on')) return; // already hung up here
     stopRing(); stopMic();
-    $('endMsg').textContent = m.ending === 'unanswered' || m.ending === 'cancelled'
-      ? 'The practice call was cancelled.' : 'That was a practice call. Nothing was real.';
+    $('endMsg').textContent = m.ending === 'unanswered' || m.ending === 'cancelled' ? words.cancelled : words.done;
     if (playing || playQueue.length) endAfterPlay = true; else finishCall();
   }
 }
@@ -174,25 +302,43 @@ function connect() {
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/call');
   ws.binaryType = 'arraybuffer';
   ws.onmessage = (e) => { try { onMsg(JSON.parse(e.data)); } catch (x) {} };
-  ws.onclose = () => { err('Reconnecting…'); setTimeout(connect, 1500); };
+  ws.onclose = (e) => {
+    if (e.code === 4001) { err('This phone page was opened in another tab or device. Reload here to use this one.'); return; }
+    err('Reconnecting…'); setTimeout(connect, 1500);
+  };
   ws.onopen = () => err('');
 }
 
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !audioCtx) return;
+  keepAwake(); audioCtx.resume().catch(() => {}); // both are dropped when the page is hidden
+});
+
 $('setupBtn').onclick = async () => {
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  await audioCtx.resume();
-  try { await navigator.wakeLock.request('screen'); } catch (e) {}
-  try { player.play().catch(() => {}); player.pause(); } catch (e) {} // unlock playback
+  // Phones only allow sound that is started inside a tap, so do this before any await.
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume().catch(() => {});
+  unlockPlayer();
+  $('setupBtn').disabled = true; err('');
+  try { cfg = (await (await fetch('/api/state')).json()).config; } catch (e) {}
+  if (!cfg.mock) { // ask for the mic now, so the prompt doesn't interrupt the call
+    try {
+      if (!navigator.mediaDevices) throw new Error('insecure');
+      (await navigator.mediaDevices.getUserMedia(MIC_OPTS)).getTracks().forEach((t) => t.stop());
+    } catch (e) { err(micMessage(e)); $('setupBtn').disabled = false; return; }
+  }
+  keepAwake();
   show('waiting'); connect();
 };
 $('answerBtn').onclick = async () => {
+  audioCtx.resume().catch(() => {}); unlockPlayer();
   stopRing(); send({ type: 'answer' }); show('incall');
   callStart = Date.now(); clearInterval(timerIv); timerIv = setInterval(tick, 500); tick();
   $('subtitle').textContent = '';
   await startMic();
 };
 $('declineBtn').onclick = () => { stopRing(); send({ type: 'decline' }); };
-$('endBtn').onclick = () => { send({ type: 'hangup' }); playQueue = []; player.pause(); finishCall(); };
+$('endBtn').onclick = () => { send({ type: 'hangup' }); resetAudio(); finishCall(); };
 $('sendBtn').onclick = () => { const t = $('replyText').value; $('replyText').value = ''; send({ type: 'reply', text: t }); };
 $('silentBtn').onclick = () => send({ type: 'silence' });
 $('replyText').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sendBtn').click(); });

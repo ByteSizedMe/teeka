@@ -1,4 +1,4 @@
-"""Offline tests for classifier.py, scenarios.json and keywords.json.
+"""Offline tests for classifier.py and the content packs.
 Run:  python test_classifier.py     (or: python -m pytest)
 """
 import json
@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import classifier as c
+import content
 
 HERE = Path(__file__).parent
 
@@ -80,35 +81,47 @@ def test_masking():
     assert "4" not in c.mask_for_display("चार 7 सात")
     assert c.mask_for_display("चार, सात एक") == "• • •"
     assert c.mask_for_display("एक मिनट रुकिए") == "एक मिनट रुकिए"
+    assert c.mask_for_display("अच्छा रुको, 4 7 1 नौ।") == "अच्छा रुको, • • • •"  # real Prisma output
 
 
 def test_scenarios_and_keywords():
-    data = json.loads((HERE / "scenarios.json").read_text(encoding="utf-8"))
-    kw = json.loads((HERE / "keywords.json").read_text(encoding="utf-8"))
-    langs = {k for k in kw if not k.startswith("_")}
+    data = content.load()
+    assert not data["warnings"], data["warnings"]
     scen = data["scenarios"]
-    assert sum(s["lang"] == "hi-IN" for s in scen) == 3
-    assert sum(s["lang"] == "en-IN" for s in scen) == 1
-    for lang in langs:
-        assert set(kw[lang]["number_words"]) == set("0123456789")
-        assert kw[lang]["comply"] and kw[lang]["resist"]
+    assert {"bank-kyc-hi", "electricity-hi", "parcel-hi", "bank-kyc-en"} <= set(data["by_id"])
+    for lang, p in data["languages"].items():
+        k = p["keywords"]
+        assert set(k["number_words"]) == set("0123456789") and k["comply"] and k["resist"], lang
+        assert set(p["templates"]) >= {"reveal_intro", "reveal_outro", "praise", "wrap", "code_word"}
     for s in scen:
-        assert s["lang"] in data["templates"] and s["lang"] in data["voices"]
         assert len(s["lines"]) == 3, s["id"]
         for line in s["lines"]:
-            assert line["lesson"] and set(line["flags"]) <= set(data["red_flags"])
-            assert not any(ch.isdigit() for ch in line["text"]), "write numbers as words"
-            # ~12 s spoken is roughly 30 words; keep a margin.
-            assert len(line["text"].split()) <= 30, (s["id"], len(line["text"].split()))
-    for t in data["templates"].values():
-        assert set(t) == {"reveal_intro", "reveal_outro", "praise", "wrap", "code_word"}
+            assert line["lesson"] and set(line["flags"]) <= set(data["languages"][s["lang"]]["red_flags"])
+            for text in line["variants"]:
+                assert not any(ch.isdigit() for ch in text), "write numbers as words"
+                assert len(text.split()) <= 30, (s["id"], len(text.split()))
+
+
+def _spoken_strings():
+    """Everything the system says or shows, from every pack. Keywords are what a person
+    might say (\"I will call the police\"), so they are the one thing left out."""
+    out = []
+    for path in sorted((HERE / "content").rglob("*.json")):
+        pack = json.loads(path.read_text(encoding="utf-8"))
+        pack.pop("keywords", None)
+        pack.pop("test_replies", None)
+        out.append((path.name, json.dumps(pack, ensure_ascii=False).lower()))
+    assert len(out) >= 25
+    return out
 
 
 def test_no_real_organisations_or_threats():
-    text = (HERE / "scenarios.json").read_text(encoding="utf-8").lower()
-    for word in ["sbi", "hdfc", "icici", "axis", "paytm", "bluedart", "dtdc", "amazon", "flipkart",
-                 "police", "पुलिस", "cbi", "court", "अदालत", "arrest", "गिरफ़्त", "गिरफ्तार", "सीबीआई", "ईडी"]:
-        assert word not in text, word
+    for name, text in _spoken_strings():
+        for word in ["sbi", "hdfc", "icici", "axis", "paytm", "bluedart", "dtdc", "amazon", "flipkart",
+                     "police", "पुलिस", "cbi", "court", "अदालत", "arrest", "गिरफ़्त", "गिरफ्तार", "सीबीआई"]:
+            assert word not in text, (name, word)
+        hit = content.blocked_term(text)
+        assert hit is None, (name, hit)
 
 
 if __name__ == "__main__":
