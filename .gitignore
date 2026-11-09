@@ -1,5 +1,8 @@
 .env
+.env.*
+!.env.example
 .venv/
+venv/
 __pycache__/
 *.pyc
 results.json
@@ -7,6 +10,12 @@ cache/
 *.wav
 *.mp3
 *.webm
+*.m4a
+*.ogg
+*.pcm
+audio_cache/
+*.egg-info/
+.pytest_cache/
 family_voice*
 .DS_Store
 Teeka-Project-Report.pdf
