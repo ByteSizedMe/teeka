@@ -26,6 +26,7 @@ GATE_TAIL_S = 0.5  # keep the gate shut a little after playback ends (speaker ec
 GATE_MARGIN_S = 8.0  # fail-safe: never stay gated longer than duration + this (allows a slow download over the tunnel)
 GRACE_S = 0.8  # wait this long after a transcript for the rest of the sentence
 PROCESSING_WAIT_S = 5.0  # extra time to wait for a transcript once Prisma says it is processing
+VOICE_RMS = 400.0  # above this a frame counts as the person speaking, for the delay measure
 MAX_BACKLOG = 15  # frames; beyond this we drop the oldest to stay real-time
 
 
@@ -53,6 +54,8 @@ class CallListener:
         self._last_speech = 0.0
         self._floor = 120.0
         self._utt_done = asyncio.Event()
+        self.grace_s, self.gate_tail_s = GRACE_S, GATE_TAIL_S
+        self.last_voice: float | None = None  # when the person's voice was last heard
         self.stats = {"real": 0, "silence": 0, "gated_dropped": 0, "bad_frames": 0}
 
     # ------------------------------------------------------------ lifecycle
@@ -94,7 +97,7 @@ class CallListener:
 
     def playback_end(self) -> None:
         self._playing = False
-        self._gated_until = self.clock() + GATE_TAIL_S
+        self._gated_until = self.clock() + self.gate_tail_s
         self._reset_utterance()
 
     # ------------------------------------------------------- frames in
@@ -102,6 +105,8 @@ class CallListener:
         if len(data) != FRAME_BYTES:
             self.stats["bad_frames"] += 1
             return
+        if not self.gate_closed() and self._rms(data) > VOICE_RMS:
+            self.last_voice = self.clock()
         if self.mode == "stream":
             self._frames.append(data)
             if len(self._frames) > MAX_BACKLOG:
@@ -225,7 +230,7 @@ class CallListener:
                     parts.append(text)
                     if isinstance(msg.get("latency"), (int, float)):
                         latencies.append(int(msg["latency"]))
-                    grace_until = self.clock() + GRACE_S
+                    grace_until = self.clock() + self.grace_s
             elif kind in ("error", "closed"):
                 self._notice("The Prisma stream dropped; switching to per-reply mode.")
                 self.mode = "rest"

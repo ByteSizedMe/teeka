@@ -6,7 +6,7 @@
  "caller_ids": [
   "ABC Cover Insurance"
  ],
- "turn_limit": 3,
+ "turn_limit": 8,
  "beats": [
   {
    "flags": [
@@ -236,5 +236,15 @@
     }
    ]
   }
+ },
+ "facts": {
+  "where": "sms",
+  "app": null,
+  "money": "otp_only",
+  "amount": null,
+  "amount_slot": null,
+  "pay": "link",
+  "deadline": "today",
+  "reason": "verify"
  }
 }

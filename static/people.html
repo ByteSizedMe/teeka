@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teeka people</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;700;800&family=Tiro+Devanagari+Hindi&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap page">
+  <header class="top">
+    <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+      <div><h1>Teeka <span lang="hi">टीका</span></h1><p class="kicker">Scam-call vaccination card</p></div></div>
+    <nav id="nav" class="nav" aria-label="Main"></nav>
+  </header>
+  <div class="page-grid">
+    <section class="card">
+      <h2>Add someone</h2>
+      <label for="pName">Name</label><input id="pName" maxlength="40" autocomplete="off">
+      <label for="pLang">Their language</label><select id="pLang"></select>
+      <label class="check"><input id="pConsent" type="checkbox"> They agreed in advance to occasional practice calls</label>
+      <div class="row"><button id="pAdd" class="primary">Save</button></div>
+      <p id="pMsg" class="alert"></p>
+      <p class="muted consent">Like a fire drill: they know drills happen, not which day. Stop if a call upsets them.</p>
+    </section>
+    <section class="card span2">
+      <h2>Family</h2>
+      <div id="list" class="people"></div>
+    </section>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+<script>
+const { $, el, api, post, nav } = Teeka;
+let languages = [];
+const langName = (code) => (languages.find((l) => l.lang === code) || { name: code }).name;
+
+async function draw() {
+  const people = await api('/api/people');
+  if (!people.length) { $('list').replaceChildren(el('p', 'muted', 'Nobody added yet. Add the person who will practise.')); return; }
+  $('list').replaceChildren(...people.map((p) => {
+    const box = el('article', 'person');
+    box.append(el('h3', null, p.name), el('p', 'muted', `${langName(p.lang)} · ${p.doses} dose${p.doses === 1 ? '' : 's'}`));
+    const check = (label, value, key) => {
+      const l = el('label', 'check'); const i = el('input'); i.type = 'checkbox'; i.checked = value;
+      i.onchange = async () => { await post('/api/people', { name: p.name, lang: p.lang, consent: p.consent, code_word_set: p.code_word_set, [key]: i.checked }); draw(); };
+      l.append(i, ' ' + label); return l;
+    };
+    box.append(check('Agreed to practice calls', p.consent, 'consent'), check('Our family has agreed a code word', p.code_word_set, 'code_word_set'));
+    box.append(el('p', 'muted small', 'Teeka never asks for the code word and never stores it.'));
+    return box;
+  }));
+}
+
+(async () => {
+  nav();
+  languages = await api('/api/languages');
+  $('pLang').replaceChildren(...languages.map((l) => { const o = el('option', null, l.name === l.native_name ? l.name : `${l.native_name} · ${l.name}`); o.value = l.lang; return o; }));
+  $('pAdd').onclick = async () => {
+    $('pMsg').textContent = '';
+    if (!$('pName').value.trim()) { $('pMsg').textContent = 'Please enter a name.'; return; }
+    if (!$('pConsent').checked) { $('pMsg').textContent = 'Please confirm they agreed in advance.'; return; }
+    await post('/api/people', { name: $('pName').value, lang: $('pLang').value, consent: true, code_word_set: false });
+    $('pName').value = ''; $('pConsent').checked = false; draw();
+  };
+  draw();
+})();
+</script>
+</body>
+</html>

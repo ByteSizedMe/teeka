@@ -7,7 +7,7 @@
   "City Power",
   "Metro Power"
  ],
- "turn_limit": 3,
+ "turn_limit": 8,
  "beats": [
   {
    "flags": [
@@ -286,5 +286,15 @@
     }
    ]
   }
+ },
+ "facts": {
+  "where": "sms",
+  "app": "abc_help",
+  "money": "paid",
+  "amount": "ten",
+  "amount_slot": "amount",
+  "pay": "link",
+  "deadline": "tonight",
+  "reason": "clear_bill"
  }
 }

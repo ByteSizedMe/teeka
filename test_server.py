@@ -15,6 +15,7 @@ import server
 def fresh(tmp: Path):
     server.engine = server.Engine(server.load_settings({}), tmp / "results.json")
     server.engine.ring_timeout = 0.3
+    server.engine.consent_required = False  # consent has its own test in test_packs.py
     client = TestClient(server.app)
     client.__enter__()  # one event loop for the whole test, like uvicorn
     return client
@@ -189,6 +190,7 @@ def _family_drill(tmp, clone_fails, voice_file):
     s = server.load_settings({"GNANI_API_KEY": "x", "FAMILY_VOICE_FILE": voice_file})
     fake = FakeGnani(tmp, clone_fails)
     server.engine = server.Engine(s, tmp / "results.json", client=fake, cache_dir=tmp)
+    server.engine.consent_required = False
     c = TestClient(server.app); c.__enter__()
     with c.websocket_connect("/ws/call") as ws:
         ws.receive_json(); start(c, ws)

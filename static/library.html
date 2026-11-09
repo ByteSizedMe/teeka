@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teeka library</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;700;800&family=Tiro+Devanagari+Hindi&family=Noto+Sans+Bengali:wght@400;700&family=Noto+Sans+Gujarati:wght@400;700&family=Noto+Sans+Gurmukhi:wght@400;700&family=Noto+Sans+Kannada:wght@400;700&family=Noto+Sans+Malayalam:wght@400;700&family=Noto+Sans+Tamil:wght@400;700&family=Noto+Sans+Telugu:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap page">
+  <header class="top">
+    <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+      <div><h1>Teeka <span lang="hi">टीका</span></h1><p class="kicker">Scam-call vaccination card</p></div></div>
+    <nav id="nav" class="nav" aria-label="Main"></nav>
+  </header>
+  <section class="card">
+    <div class="titlebar"><h2>Scam library</h2>
+      <div class="inline-field"><label for="lang">Language</label><select id="lang"></select></div></div>
+    <p class="muted">What each scam sounds like, the red flags, and what to do instead.</p>
+    <div id="items" class="library"></div>
+  </section>
+  <section class="card help-wide" id="help"></section>
+</div>
+<script src="/static/app.js"></script>
+<script>
+const { $, el, api, nav, helpCard } = Teeka;
+
+async function draw() {
+  const items = await api('/api/library?lang=' + encodeURIComponent($('lang').value));
+  $('items').replaceChildren(...items.map((s) => {
+    const a = el('article', 'scam'); a.id = s.fraud;
+    a.append(el('h3', null, s.title));
+    if (s.title !== s.title_local) { const t = el('p', 'local', s.title_local); t.lang = s.lang; a.append(t); }
+    a.append(el('p', 'muted small', `Practise saying no to: ${s.practise}`));
+    const chips = el('div', 'chips');
+    s.flags.forEach((f) => { const c = el('span', 'chip still', f.en === f.local ? f.en : `${f.en} · ${f.local}`); chips.append(c); });
+    a.append(chips);
+    const ul = el('ul', 'lessons'); ul.lang = s.lang;
+    s.lessons.forEach((l) => ul.append(el('li', null, l)));
+    a.append(ul);
+    return a;
+  }));
+  if (location.hash) { const t = document.querySelector(location.hash); if (t) t.scrollIntoView(); }
+}
+
+(async () => {
+  nav(); helpCard($('help'));
+  const languages = await api('/api/languages');
+  $('lang').replaceChildren(...languages.map((l) => { const o = el('option', null, l.name === l.native_name ? l.name : `${l.native_name} · ${l.name}`); o.value = l.lang; return o; }));
+  try { const s = localStorage.getItem('teeka-lang'); if (languages.some((l) => l.lang === s)) $('lang').value = s; } catch (e) {}
+  $('lang').onchange = draw;
+  draw();
+})();
+</script>
+</body>
+</html>

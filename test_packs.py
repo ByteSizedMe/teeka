@@ -29,6 +29,7 @@ DATA = content.load()
 def fresh(tmp):
     server.engine = server.Engine(server.load_settings({}), tmp / "results.json")
     server.engine.ring_timeout = 30
+    server.engine.consent_required = False  # test_consent_gate checks it
     client = TestClient(server.app)
     client.__enter__()
     return client
@@ -251,7 +252,7 @@ def test_repeat_says_the_same_beat_and_counts_a_turn(tmp):
     with c1.websocket_connect("/ws/call") as ws:
         ws.receive_json()
         begin(c1, ws, "bank-kyc-hi")
-        for _ in range(2):
+        for _ in range(7):
             ws.send_json({"type": "reply", "text": "फिर से बोलिए"})
             assert until(ws, "caller")["idx"] == 0
         ws.send_json({"type": "reply", "text": "फिर से बोलिए"})
@@ -311,14 +312,14 @@ def test_surprise_and_next_dose_use_results(tmp):
 def test_public_api_is_built_from_packs(tmp):
     c1 = fresh(tmp)
     langs = c1.get("/api/languages").json()
-    assert {l["lang"] for l in langs} == GNANI_LANGUAGES and all(l["draft"] and l["scams"] == len(FRAUDS) for l in langs)
+    assert {l["lang"] for l in langs} == GNANI_LANGUAGES and all(l["scams"] == len(FRAUDS) for l in langs)
     rows = c1.get("/api/scenarios").json()
     assert len(rows) == len(DATA["scenarios"]) and all(r["practise"] and r["fraud"] for r in rows)
     with c1.websocket_connect("/ws/call") as ws:
         ws.receive_json()
         begin(c1, ws, "parcel-te")
         d = c1.get("/api/state").json()["drill"]
-        assert d["draft_language"] and d["lang"] == "te-IN" and d["turn_limit"] == 3
+        assert d["draft_language"] and d["lang"] == "te-IN" and d["turn_limit"] == 8
         assert all(f["local"] != f["en"] for f in d["flags"])
 
 
@@ -338,6 +339,226 @@ def test_stamp_is_in_the_call_language(tmp):
         finish_with(ws, "മനസ്സിലായില്ല 4 7 1")
         d = c1.get("/api/state").json()["drill"]
         assert d["stamp"] == "Needs another dose" and d["stamp_local"] == DATA["languages"]["ml-IN"]["stamps"]["missed"]
+
+
+# ------------------------------------------------------------- conversation
+def test_every_intent_in_every_language():
+    for lang, p in DATA["languages"].items():
+        assert {i for _, i in p["intent_tests"]} == set(c.INTENTS), lang
+        for text, intent in p["intent_tests"]:
+            assert c.classify(text, lang) == c.UNSURE and c.unsure_reason(text, lang) == intent, (lang, text)
+
+
+def test_caller_answers_each_question_for_every_scam():
+    src = content.PackLineSource(DATA["languages"])
+    for s in DATA["scenarios"]:
+        for intent in c.INTENTS:
+            line = src.answer(s, intent, 0, set())
+            assert line and "{" not in line and content.blocked_term(line) is None and not any(ch.isdigit() for ch in line), (s["id"], intent)
+
+
+def test_facts_stay_the_same_within_a_call():
+    src = content.PackLineSource(DATA["languages"])
+    parcel = DATA["by_id"]["parcel-hi"]
+    for seed in (0, 1):
+        amount = parcel["slots"]["amount"][seed % 2]
+        assert amount in src.plan(parcel, seed)["lines"][1] and amount in src.answer(parcel, "how_much", seed, set()), seed
+
+
+def test_never_repeats_word_for_word():
+    src = content.PackLineSource(DATA["languages"])
+    for sid in ("bank-kyc-hi", "bank-kyc-ta", "parcel-en"):
+        said = set()
+        for _ in range(4):
+            line = src.answer(DATA["by_id"][sid], "how_long", 0, said)
+            assert line not in said, sid
+            said.add(line)
+
+
+def _conversation(c1, ws, sid, replies):
+    begin(c1, ws, sid)
+    lines = []
+    for text in replies:
+        ws.send_json({"type": "reply", "text": text})
+        lines.append(until(ws, "caller")["text"])
+    ws.send_json({"type": "hangup"})
+    until(ws, "end")
+    return lines
+
+
+def test_different_replies_make_different_calls(tmp):
+    c1 = fresh(tmp)
+    with c1.websocket_connect("/ws/call") as ws:
+        ws.receive_json()
+        a = _conversation(c1, ws, "electricity-hi", ["कौन सा ऐप डाउनलोड करूँ"])
+        hi = DATA["languages"]["hi-IN"]
+        assert hi["app_names"]["abc_help"] in a[0]
+        server.engine.drill = None
+        b = _conversation(c1, ws, "electricity-hi", ["कितने पैसे भेजने हैं?"])
+        assert a[0] != b[0] and any(w in b[0] for w in ("बीस", "दस"))
+
+
+def test_questions_are_answered_past_the_last_beat(tmp):
+    c1 = fresh(tmp)
+    with c1.websocket_connect("/ws/call") as ws:
+        ws.receive_json()
+        begin(c1, ws, "parcel-hi")
+        seen = []
+        for _ in range(7):
+            ws.send_json({"type": "reply", "text": "पैसे कैसे भेजूँ"})
+            seen.append(until(ws, "caller")["text"])
+        assert len(set(seen)) == 7  # eight caller lines, none repeated
+        ws.send_json({"type": "reply", "text": "पैसे कैसे भेजूँ"})
+        assert until(ws, "teacher")["kind"] == "wrap"
+
+
+def test_stop_on_comply_beats_everything(tmp):
+    assert c.classify("हाँ ओटीपी आया है, कितने पैसे") == c.COMPLYING
+    assert c.classify("कितने पैसे 4 7 1") == c.COMPLYING
+    c1 = fresh(tmp)
+    with c1.websocket_connect("/ws/call") as ws:
+        ws.receive_json()
+        begin(c1, ws, "bank-kyc-hi")
+        t, end = finish_with(ws, "ठीक है 4 7 1 9")
+        assert t["kind"] == "reveal" and end["outcome"] == "missed"
+
+
+def test_distress_ends_kindly_and_schedules_nothing(tmp):
+    c1 = fresh(tmp)
+    with c1.websocket_connect("/ws/call") as ws:
+        ws.receive_json()
+        begin(c1, ws, "bank-kyc-hi")
+        t, end = finish_with(ws, "मुझे डर लग रहा है")
+        assert t["kind"] == "comfort" and end["ending"] == "distress"
+    row = json.loads((tmp / "results.json").read_text(encoding="utf-8"))[0]
+    assert row["outcome"] == "paused" and row["next_dose"] is None
+    assert c1.get("/api/reports").json()["doses"] == 0
+
+
+class _Model(content.PackLineSource):
+    reply, calls = None, []
+    async def improvise(self, scenario, masked, said):
+        self.calls.append(masked)
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply
+
+
+def test_model_only_for_unclear_and_every_failure_falls_back(tmp):
+    hi_pack = DATA["languages"]["hi-IN"]
+    for reply, used in [("जी आपका काम आज ही होगा।", True), (RuntimeError("down"), False), ("call the police 4719", False), ("english only here", False), (None, False)]:
+        c1 = fresh(tmp)
+        server.engine.lines = _Model(DATA["languages"])
+        server.engine.lines.reply = reply
+        server.engine.lines.calls = []
+        with c1.websocket_connect("/ws/call") as ws:
+            ws.receive_json()
+            begin(c1, ws, "bank-kyc-hi", name=f"M{id(reply)}")
+            ws.send_json({"type": "reply", "text": "अच्छा जी मेरा 4 दोस्त"})
+            line = until(ws, "caller")["text"]
+            assert (isinstance(reply, str) and reply in line) == used, reply
+            assert "4" not in server.engine.lines.calls[0]  # masked before it leaves
+            ws.send_json({"type": "hangup"}); until(ws, "end")
+    assert "उपलब्ध" not in hi_pack["templates"]["praise"]
+
+
+def test_clear_questions_never_reach_a_model(tmp):
+    c1 = fresh(tmp)
+    server.engine.lines = _Model(DATA["languages"])
+    server.engine.lines.calls = []
+    with c1.websocket_connect("/ws/call") as ws:
+        ws.receive_json()
+        begin(c1, ws, "bank-kyc-hi")
+        ws.send_json({"type": "reply", "text": "ओटीपी कहाँ आएगा"})
+        until(ws, "caller")
+    assert server.engine.lines.calls == []
+
+
+# ----------------------------------------------------------------- features
+def test_consent_gate(tmp):
+    c1 = fresh(tmp)
+    server.engine.consent_required = True
+    assert c1.post("/api/drills", json={"scenario_id": "bank-kyc-hi", "name": "Asha"}).status_code == 403
+    c1.post("/api/people", json={"name": "Asha", "lang": "hi-IN", "consent": False})
+    assert c1.post("/api/drills", json={"scenario_id": "bank-kyc-hi", "name": "Asha"}).status_code == 403
+    c1.post("/api/people", json={"name": "Asha", "lang": "hi-IN", "consent": True})
+    assert c1.post("/api/drills", json={"scenario_id": "bank-kyc-hi", "name": "Asha"}).status_code == 200
+
+
+def test_code_word_is_never_stored(tmp):
+    c1 = fresh(tmp)
+    c1.post("/api/people", json={"name": "Asha", "lang": "hi-IN", "consent": True, "code_word_set": True, "code_word": "MANGO"})
+    assert "MANGO" not in (tmp / "people.json").read_text(encoding="utf-8")
+    assert c1.get("/api/people").json()[0]["code_word_set"] is True
+
+
+def test_reports_count_real_results_only(tmp):
+    c1 = fresh(tmp)
+    r = c1.get("/api/reports").json()
+    assert r["immunity"] is None and r["doses"] == 0 and r["flags"] == [] and r["cohort"] == [] and r["median_refuse_s"] is None
+    with c1.websocket_connect("/ws/call") as ws:
+        ws.receive_json()
+        begin(c1, ws, "bank-kyc-hi"); finish_with(ws, "4719")
+        begin(c1, ws, "parcel-hi"); finish_with(ws, "मुझे नहीं चाहिए")
+    r = c1.get("/api/reports", params={"name": "Kamla"}).json()
+    assert r["doses"] == 2 and r["protected"] == 1 and r["immunity"] == 50 and r["median_refuse_s"] is not None
+    assert [d["pct"] for d in r["by_dose"]] == [0, 100] and r["cohort"][0]["people"] == 1
+    assert {f["id"]: f["pct"] for f in r["flags"]}["asks_otp" if False else "unsolicited"] == 50
+
+
+def test_csv_has_outcomes_only(tmp):
+    c1 = fresh(tmp)
+    with c1.websocket_connect("/ws/call") as ws:
+        ws.receive_json()
+        begin(c1, ws, "bank-kyc-hi", name="Secret Name"); finish_with(ws, "4719")
+    text = c1.get("/api/reports.csv").text
+    assert "Secret Name" not in text and "person-1" in text and "4719" not in text
+
+
+def test_library_and_calendar(tmp):
+    c1 = fresh(tmp)
+    items = c1.get("/api/library", params={"lang": "ta-IN"}).json()
+    assert len(items) == len(FRAUDS) and all(i["flags"] and i["lessons"] for i in items)
+    assert c1.get("/api/next_dose.ics", params={"name": "Nobody"}).status_code == 404
+    with c1.websocket_connect("/ws/call") as ws:
+        ws.receive_json()
+        begin(c1, ws, "bank-kyc-hi"); finish_with(ws, "4719")
+    ics = c1.get("/api/next_dose.ics", params={"name": "Kamla"}).text
+    assert "BEGIN:VEVENT" in ics and "DTSTART;VALUE=DATE:" in ics
+    for p in ("/people", "/library", "/reports"):
+        assert c1.get(p).status_code == 200
+
+
+def test_app_shows_no_demo_or_draft_wording():
+    for name in ("dashboard.html", "call.html", "people.html", "library.html", "reports.html"):
+        text = (HERE / "static" / name).read_text(encoding="utf-8").lower()
+        assert "draft language" not in text and "role-played" not in text, name
+
+
+def test_only_gnani_models():
+    banned = ("anthropic", "openai.com", "api.openai", "import openai", "gemini", "mistralai", "cohere", "groq", "claude-")
+    files = [HERE / "requirements.txt", *HERE.glob("*.py"), *(HERE / "static").glob("*")]
+    for f in files:
+        if f.name == "test_packs.py":
+            continue
+        text = f.read_text(encoding="utf-8").lower()
+        for word in banned:
+            assert word not in text, (f.name, word)
+
+
+def test_turn_time_is_measured_from_the_persons_voice():
+    import listener as L
+    t = [100.0]
+    lst = L.CallListener(mode="rest", lang="hi-IN", listen_max_s=5, min_silence_ms=500, clock=lambda: t[0])
+    lst.push_frame(bytes(1024))
+    assert lst.last_voice is None
+    from array import array
+    lst.push_frame(array("h", [8000] * 512).tobytes())
+    assert lst.last_voice == 100.0
+    lst.gate_close(3.0)
+    t[0] = 101.0
+    lst.push_frame(array("h", [8000] * 512).tobytes())
+    assert lst.last_voice == 100.0  # the caller's own voice leaking in does not count
 
 
 TESTS = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]

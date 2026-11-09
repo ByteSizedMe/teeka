@@ -11,7 +11,9 @@
   "endLabel": "End call",
   "endTitle": "Call ended",
   "done": "That was only a practice call. Nothing was real, and you are safe.",
-  "cancelled": "The practice call was cancelled."
+  "cancelled": "The practice call was cancelled.",
+  "replayLabel": "Hear it again",
+  "slowLabel": "Slower voice"
  },
  "red_flags": {
   "unsolicited": "Unexpected call",
@@ -244,7 +246,62 @@
    "9": [
     "nine"
    ]
-  }
+  },
+  "asks": {
+   "where_message": [
+    "where will it come",
+    "where will the message",
+    "where do i get",
+    "where will i get",
+    "where is the link",
+    "where is the message"
+   ],
+   "which_app": [
+    "which app",
+    "what app",
+    "name of the app",
+    "what is the app"
+   ],
+   "how_much": [
+    "how much"
+   ],
+   "how_to_pay": [
+    "how do i pay",
+    "how to pay",
+    "how should i pay",
+    "how can i pay",
+    "how do i send",
+    "where do i send",
+    "where should i send"
+   ],
+   "who_are_you": [
+    "which company",
+    "what company",
+    "your name",
+    "which department"
+   ],
+   "why_needed": [
+    "why do you need",
+    "why is this needed",
+    "why should i",
+    "what is it for"
+   ],
+   "how_long": [
+    "how long",
+    "by when",
+    "how much time",
+    "what time"
+   ]
+  },
+  "distress": [
+   "i am scared",
+   "i'm scared",
+   "frightened",
+   "please stop",
+   "stop it",
+   "stop this",
+   "i feel unwell"
+  ]
  },
  "test_replies": [
   [
@@ -294,10 +351,184 @@
   "reveal_outro": "That is all right. Anyone can slip, and that is exactly why we practise. Next time, just hang up and tell your family.",
   "praise": "Well done! This was a Teeka practice call, and you handled it perfectly. Saying no is the best thing you can do.",
   "wrap": "This was a Teeka practice call. You did not share anything, and that is good. Remember, if you are unsure, hang up and ask your family.",
-  "code_word": "One more thing: agree on a secret family word. If someone with a familiar voice ever asks you for money or a code, ask for that word first."
+  "code_word": "One more thing: agree on a secret family word. If someone with a familiar voice ever asks you for money or a code, ask for that word first.",
+  "comfort": "Please don't worry, everything is fine. This was a Teeka practice call and it has stopped now. Nothing was real. Please take a rest."
  },
  "stamps": {
   "protected": "Protected",
   "missed": "Needs another dose"
- }
+ },
+ "again": [
+  "As I told you,",
+  "Like I said,"
+ ],
+ "filler": [
+  "Yes, one second.",
+  "Okay, listen."
+ ],
+ "amount_words": {
+  "ten": "ten",
+  "forty_nine": "forty nine",
+  "two_thousand": "two thousand",
+  "fifteen_hundred": "one thousand five hundred",
+  "three_thousand": "three thousand",
+  "ten_thousand": "ten thousand",
+  "twenty_thousand": "twenty thousand",
+  "five_hundred": "five hundred"
+ },
+ "app_names": {
+  "abc_help": "ABC Help",
+  "abc_cash": "ABC Cash",
+  "abc_trade": "ABC Trade"
+ },
+ "answers": {
+  "where_message": {
+   "sms": [
+    "You will get an SMS on your phone, look there.",
+    "The message comes straight to your phone inbox."
+   ],
+   "whatsapp": [
+    "A message will reach your WhatsApp now.",
+    "I am sending it on WhatsApp, please check there."
+   ],
+   "upi_app": [
+    "The request will show in your UPI app.",
+    "Open your UPI app, the alert comes there."
+   ]
+  },
+  "which_app": {
+   "named": [
+    "The app is called {app}, I am sending you the link.",
+    "You just install {app}, I will do the rest."
+   ],
+   "none": [
+    "You do not need any new app, just stay on the line.",
+    "No app is needed, it all happens on this call."
+   ]
+  },
+  "how_much": {
+   "paid": [
+    "Only {amount} rupees.",
+    "It is just {amount} rupees, nothing more."
+   ],
+   "otp_only": [
+    "Not one rupee, I only need the code.",
+    "There is no money involved, just tell me the code."
+   ],
+   "receive": [
+    "You pay nothing, the money comes to you.",
+    "Just scan it and the money reaches you."
+   ]
+  },
+  "how_to_pay": {
+   "upi": [
+    "Open your UPI app and enter your PIN.",
+    "Through UPI, you only enter the PIN."
+   ],
+   "link": [
+    "The payment happens in the link you receive.",
+    "Open the link, the pay button is right there."
+   ],
+   "transfer": [
+    "I am sending the account on WhatsApp, send it there.",
+    "Send it now to the account I am sending you."
+   ],
+   "scan": [
+    "Scan the QR I sent and enter your PIN.",
+    "As soon as you scan the QR it is done."
+   ],
+   "none": [
+    "There is no payment, just say the code.",
+    "You send no money, just tell me the code you got."
+   ]
+  },
+  "how_long": {
+   "tonight": [
+    "You only have until tonight.",
+    "Just until tonight, after that nothing can be done."
+   ],
+   "today": [
+    "It has to be done today.",
+    "You have only until this evening."
+   ],
+   "two_hours": [
+    "Only two hours are left.",
+    "Everything stops in two hours."
+   ],
+   "now": [
+    "It has to be right now.",
+    "We do not have even a minute."
+   ]
+  },
+  "why_needed": {
+   "verify": [
+    "This is required to verify your identity.",
+    "Without updating the record we cannot proceed."
+   ],
+   "clear_bill": [
+    "This is needed to clear your pending dues.",
+    "The system is showing dues, that is why."
+   ],
+   "release": [
+    "Without this, it cannot be released to you.",
+    "It is the standard fee, then you receive it."
+   ],
+   "refund": [
+    "This is the only way to send my money back.",
+    "The bank said the money returns only like this."
+   ],
+   "treatment": [
+    "The money must be deposited for treatment now.",
+    "The doctors will not start without it."
+   ],
+   "job": [
+    "This is required to confirm your seat.",
+    "It is the registration rule."
+   ],
+   "protect": [
+    "This is to keep your account safe.",
+    "Otherwise you will suffer a loss."
+   ],
+   "profit": [
+    "The sooner you invest, the bigger the profit.",
+    "This is the moment, the price changes tomorrow."
+   ]
+  },
+  "who_are_you": {
+   "any": [
+    "I am an authorised staff member, your record is in front of me.",
+    "I have been assigned to your case."
+   ]
+  }
+ },
+ "intent_tests": [
+  [
+   "where will I get the message",
+   "where_message"
+  ],
+  [
+   "which app should I download",
+   "which_app"
+  ],
+  [
+   "how much money",
+   "how_much"
+  ],
+  [
+   "how can I pay",
+   "how_to_pay"
+  ],
+  [
+   "which company is this",
+   "who_are_you"
+  ],
+  [
+   "why do you need it",
+   "why_needed"
+  ],
+  [
+   "by when",
+   "how_long"
+  ]
+ ]
 }

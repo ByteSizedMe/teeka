@@ -6,7 +6,7 @@
  "caller_ids": [
   "Unknown Number"
  ],
- "turn_limit": 3,
+ "turn_limit": 8,
  "beats": [
   {
    "flags": [
@@ -249,5 +249,15 @@
     }
    ]
   }
+ },
+ "facts": {
+  "where": "whatsapp",
+  "app": null,
+  "money": "paid",
+  "amount": "twenty_thousand",
+  "amount_slot": "amount",
+  "pay": "transfer",
+  "deadline": "now",
+  "reason": "treatment"
  }
 }

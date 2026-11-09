@@ -12,7 +12,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import csv
+import io
 import statistics
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -20,7 +23,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 import re
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -36,6 +39,7 @@ load_dotenv(ROOT / ".env")
 BOOSTER_DAYS = 3  # after a miss
 NEXT_SCAM_DAYS = 7  # after a pass
 RING_TIMEOUT_S = 45
+LLM_TIMEOUT_S = 2.0
 MAX_REPLY_CHARS = 500
 
 STAMPS = {"protected": "Protected", "missed": "Needs another dose"}
@@ -61,6 +65,9 @@ class Settings:
     listen_max_s: float = 9.0
     vad_threshold: float = 0.6
     vad_min_silence_ms: int = 600
+    grace_s: float = 0.8
+    gate_tail_s: float = 0.5
+    evon_url: str = ""
     warnings: list = field(default_factory=list)
 
     @property
@@ -111,6 +118,9 @@ def load_settings(env=None) -> Settings:
     s.listen_max_s = num("LISTEN_MAX_S", float, 9.0, 2.0, 60.0)
     s.vad_threshold = num("VAD_THRESHOLD", float, 0.6, 0.0, 1.0)
     s.vad_min_silence_ms = num("VAD_MIN_SILENCE_MS", int, 600, 100, 2000)
+    s.grace_s = num("GRACE_S", float, 0.8, 0.1, 3.0)
+    s.gate_tail_s = num("GATE_TAIL_S", float, 0.5, 0.1, 2.0)
+    s.evon_url = (env.get("EVON_URL") or "").strip()
     s.warnings = warn
     return s
 
@@ -140,6 +150,8 @@ def teacher_text(kind: str, scenario: dict, line_idx: int, with_code_word: bool)
         parts = [t["reveal_intro"], scenario["lines"][line_idx]["lesson"], t["reveal_outro"]]
     elif kind == "praise":
         parts = [t["praise"]]
+    elif kind == "comfort":
+        parts = [t["comfort"]]
     else:
         parts = [t["wrap"]]
     if with_code_word:
@@ -160,7 +172,10 @@ class Engine:
         self.client = client if client is not None else (
             None if settings.mock else GnaniClient(settings.api_key, self.cache_dir))
         self.listener: CallListener | None = None
-        self.lines = content.PackLineSource(CONTENT["languages"])
+        self.lines = (content.EvonLineSource(CONTENT["languages"], settings.evon_url) if settings.evon_url
+                      else content.PackLineSource(CONTENT["languages"]))
+        self.turn_ms: list[int] = []  # end of the person's speech to the caller's first sound
+        self._timing_turn = False
         self.runtime_notices: list[str] = []
         self._listen_task: asyncio.Task | None = None
         self._prewarm_task: asyncio.Task | None = None
@@ -168,6 +183,8 @@ class Engine:
         self._family: dict | None = None
         self._family_tried = False
         self.results_path = Path(results_path)
+        self.people_path = self.results_path.with_name("people.json")
+        self.consent_required = True
         self.phone: WebSocket | None = None
         self.drill: dict | None = None
         self.latencies: list[int] = []  # Prisma latency (ms), numbers only
@@ -188,6 +205,52 @@ class Engine:
         tmp = self.results_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
         tmp.replace(self.results_path)
+
+    # ---- family profiles: name, language, consent, and whether a code word exists ----
+    def read_people(self) -> dict:
+        try:
+            data = json.loads(self.people_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def save_person(self, name: str, lang: str, consent: bool, code_word_set: bool) -> dict:
+        people = self.read_people()
+        people[name] = {"name": name, "lang": lang, "consent": consent, "code_word_set": code_word_set}
+        tmp = self.people_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(people, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(self.people_path)
+        return people[name]
+
+    def report(self, name: str | None = None) -> dict:
+        """Everything here is counted from stored outcomes. Nothing is estimated."""
+        rows = [r for r in self.read_results() if not name or r["name"] == name]
+        scored = [r for r in rows if r["outcome"] in STAMPS]
+        recent = scored[-10:]
+        protected = sum(r["outcome"] == "protected" for r in scored)
+        seen, missed, doses, per_person = {}, {}, {}, {}
+        for r in scored:
+            for f in r.get("flags", []):
+                seen[f] = seen.get(f, 0) + 1
+                missed[f] = missed.get(f, 0) + (r["outcome"] == "missed")
+            n = per_person[r["name"]] = per_person.get(r["name"], 0) + 1
+            total, passed = doses.get(n, (0, 0))
+            doses[n] = (total + 1, passed + (r["outcome"] == "protected"))
+        english = CONTENT["languages"].get("en-IN", {}).get("red_flags", {})
+        pct = lambda a, b: round(100 * a / b)  # noqa: E731
+        refusals = [r["decide_s"] for r in scored if r.get("ending") == "refused" and r.get("decide_s") is not None]
+        cohort = {}
+        for r in scored:
+            c = cohort.setdefault(r["lang"], {"people": set(), "doses": 0, "protected": 0})
+            c["people"].add(r["name"]); c["doses"] += 1; c["protected"] += r["outcome"] == "protected"
+        return {
+            "doses": len(scored), "protected": protected,
+            "immunity": pct(sum(r["outcome"] == "protected" for r in recent), len(recent)) if recent else None,
+            "flags": [{"id": f, "en": english.get(f, f), "seen": n, "missed": missed[f], "pct": pct(missed[f], n)} for f, n in seen.items()],
+            "by_dose": [{"dose": d, "total": t, "passed": p, "pct": pct(p, t)} for d, (t, p) in sorted(doses.items())],
+            "median_refuse_s": round(statistics.median(refusals), 1) if refusals else None,
+            "cohort": [{"lang": k, "name": CONTENT["languages"].get(k, {}).get("name", k), "people": len(v["people"]), "doses": v["doses"], "pct": pct(v["protected"], v["doses"])} for k, v in cohort.items()],
+        }
 
     def card(self, name: str | None) -> dict:
         rows = self.read_results()
@@ -274,6 +337,8 @@ class Engine:
 
     async def start(self, scenario_id: str, name: str, lang: str | None = None) -> dict:
         name = (name or "").strip()[:40] or "Family"
+        if self.consent_required and not self.read_people().get(name, {}).get("consent"):
+            raise HTTPException(403, "Please confirm this person agreed in advance to practice calls.")
         if scenario_id == SURPRISE:
             if not scenarios_in(lang or ""):
                 raise HTTPException(404, "Choose a language first")
@@ -288,7 +353,7 @@ class Engine:
                 raise HTTPException(409, "A practice call is already in progress")
             self.drill = {
                 "id": uuid.uuid4().hex[:8], "scenario_id": scenario_id,
-                "name": name, "seed": seed, "caller_id": plan["caller_id"], "plan": plan["lines"], "turn": 0,
+                "name": name, "seed": seed, "caller_id": plan["caller_id"], "plan": plan["lines"], "turn": 0, "said": set(),
                 "status": "ringing", "line_idx": 0, "awaiting": False,
                 "transcript": [], "flags": [], "outcome": None, "ending": None,
                 "teacher_label": "Teacher",
@@ -300,16 +365,25 @@ class Engine:
             if self._family is None:
                 self._family_tried = False  # retry the family voice each drill until it works
             if self.client is not None:  # live: have the caller's voice ready before they answer
-                self._prewarm_task = asyncio.create_task(self._prewarm(scenario["lang"], plan["lines"]))
+                self._prewarm_task = asyncio.create_task(self._prewarm(scenario["lang"], self._lines_to_warm(scenario, plan, seed)))
         await self._send_ring()
         return self.public_drill()
 
+    def _lines_to_warm(self, scenario: dict, plan: dict, seed: int) -> list:
+        """The caller's beats, the fillers, and the first answer to the questions people ask most."""
+        lang_fillers = [self.lines.filler(scenario["lang"], n) for n in range(2)]
+        common = [self.lines.answer(scenario, i, seed, set()) for i in ("where_message", "which_app", "how_much", "how_to_pay")]
+        return list(dict.fromkeys(plan["lines"] + lang_fillers + common))
+
     async def _prewarm(self, lang: str, lines: list) -> None:
         voice, language = voice_for(lang, "caller", self.s.tts_model)
-        await asyncio.gather(
+        paths = await asyncio.gather(
             *(self.client.tts(text, voice, language, self.s.tts_model) for text in lines),
             return_exceptions=True,
         )
+        urls = ["/api/audio/" + p.name for p in paths if isinstance(p, Path)]
+        if urls:
+            await self._send({"type": "prefetch", "urls": urls})  # so the phone has them before they are needed
 
     def _notice(self, text: str) -> None:
         if text not in self.runtime_notices:
@@ -355,6 +429,28 @@ class Engine:
             return {}
         return {"audio_url": "/api/audio/" + path.name, "duration": wav_duration(path.read_bytes())}
 
+    async def _play_filler_if_slow(self, d: dict, sc: dict, parts: list) -> None:
+        """If this line's audio still has to be made, cover the wait with a short cached line."""
+        c = self.client
+        if c is None or not hasattr(c, "is_cached"):
+            return
+        voice, language = voice_for(sc["lang"], "caller", self.s.tts_model)
+        if all(c.is_cached(p, voice, language, self.s.tts_model) for p in parts):
+            return
+        extra = await self._speak("caller", self.lines.filler(sc["lang"], d["turn"]), sc["lang"])
+        if extra and d["status"] == "active":
+            if self.listener is not None:
+                self.listener.gate_close(extra.get("duration", 0.0))
+            await self._send({"type": "filler", **extra})
+
+    async def _improvise(self, sc: dict, masked: str, d: dict) -> str | None:
+        """Only for replies the rules could not place. Any failure means the pack line is used."""
+        try:
+            line = await asyncio.wait_for(self.lines.improvise(sc, masked, d["said"]), LLM_TIMEOUT_S)
+        except Exception:
+            return None
+        return line if content.line_is_safe(line, sc["lang"], CONTENT["languages"]) else None
+
     async def _start_listener(self, lang: str) -> None:
         if self.client is None or self.listener is not None:
             return
@@ -369,6 +465,7 @@ class Engine:
         self.listener = CallListener(
             mode=s.stt_mode, lang=lang, listen_max_s=s.listen_max_s, min_silence_ms=s.vad_min_silence_ms,
             open_stream=open_stream, transcribe=transcribe, on_notice=self._notice)
+        self.listener.grace_s, self.listener.gate_tail_s = s.grace_s, s.gate_tail_s
         # Prisma connects while the caller's first line plays; _listen waits for it.
         self._listener_task = asyncio.create_task(self.listener.start())
 
@@ -419,6 +516,7 @@ class Engine:
             if self._ring_task:
                 self._ring_task.cancel()
             d["status"] = "active"
+            d["answered_at"] = time.monotonic()
             await self._start_listener(CONTENT["by_id"][d["scenario_id"]]["lang"])  # connects in the background
             await self._say_caller(0)
         elif kind == "decline" and d["status"] == "ringing":
@@ -434,6 +532,10 @@ class Engine:
             self._notice(PHONE_PROBLEMS[msg["what"]])
         elif kind == "playback_start" and self.listener:
             self.listener.playback_start()
+            heard = self.listener.last_voice
+            if self._timing_turn and heard is not None:
+                self.turn_ms.append(int((self.listener.clock() - heard) * 1000))
+            self._timing_turn = False
         elif kind == "playback_end" and self.listener:
             self.listener.playback_end()
 
@@ -445,20 +547,31 @@ class Engine:
     async def _say_caller(self, idx: int, opener: str = "") -> None:
         d = self.drill
         sc = CONTENT["by_id"][d["scenario_id"]]
-        line = sc["lines"][idx]
-        text = f"{opener} {d['plan'][idx]}".strip()
-        extra = await self._speak("caller", text, sc["lang"])
+        if idx is not None:
+            for f in sc["lines"][idx]["flags"]:
+                if f not in d["flags"]:
+                    d["flags"].append(f)
+        body = d["plan"][idx] if idx is not None else ""
+        text = f"{opener} {body}".strip()
+        parts = [p for p in (opener, body) if p]  # spoken separately, so answers and beats each cache once
+        await self._play_filler_if_slow(d, sc, parts)
+        spoken = [await self._speak("caller", p, sc["lang"]) for p in parts]
+        extra = dict(spoken[0])
+        if extra and len(spoken) > 1:
+            extra["more"] = [x["audio_url"] for x in spoken[1:] if x]
+            extra["duration"] = sum(x.get("duration", 0.0) for x in spoken)
         if d["status"] != "active":  # hung up while the voice was being made
             return
         if self.listener is not None:  # close the mic gate BEFORE the phone is told to play
             self.listener.gate_close(extra.get("duration", 0.0))
-        d["line_idx"], d["awaiting"] = idx, True
+        d["line_idx"] = d["line_idx"] if idx is None else idx
+        d["awaiting"] = True
+        d["said"].add(text)
+        if opener:
+            d["said"].add(opener)
         d["turn"] += 1
         d["transcript"].append({"who": "caller", "text": text})
-        for f in line["flags"]:
-            if f not in d["flags"]:
-                d["flags"].append(f)
-        await self._send({"type": "caller", "idx": idx, "text": text, **extra})
+        await self._send({"type": "caller", "idx": d["line_idx"], "text": text, **extra})
         if self.listener is not None:
             self._listen_task = asyncio.create_task(self._listen(self.listener))
 
@@ -470,21 +583,37 @@ class Engine:
                 return
             d["awaiting"] = False
             sc = CONTENT["by_id"][d["scenario_id"]]
+            distressed = classifier.is_distress(text, sc["lang"])
             verdict = classifier.classify(text, sc["lang"])
             cue = classifier.unsure_reason(text, sc["lang"]) if verdict == classifier.UNSURE else None
             shown = classifier.mask_for_display(text, sc["lang"]) if text.strip() else "(no reply)"
+            not_blank = bool(text.strip())
+            self._timing_turn = not_blank
             del text  # the raw words are never kept
             if latency_ms is not None:
                 self.latencies.append(int(latency_ms))
             d["transcript"].append({"who": "person", "text": shown, "verdict": VERDICT_LABELS[verdict]})
             idx = d["line_idx"]
-        if verdict == classifier.COMPLYING:
+        if distressed:
+            await self._finish("distress", outcome="paused", teacher="comfort")
+        elif verdict == classifier.COMPLYING:
             await self._finish("missed", outcome="missed", teacher="reveal")
         elif verdict == classifier.REFUSING:
             await self._finish("refused", outcome="protected", teacher="praise")
+        elif cue in classifier.INTENTS and d["turn"] < sc["turn_limit"]:
+            # A question: answer it from this scam's facts, then keep pressing.
+            answer = self.lines.answer(sc, cue, d["seed"], d["said"])
+            d["said"].add(answer)
+            if idx + 1 < len(sc["lines"]):
+                await self._say_caller(idx + 1, answer)
+            else:
+                press = self.lines.press(sc["lang"], d["seed"] + d["turn"], d["said"])
+                await self._say_caller(None, f"{answer} {press}")
         elif d["turn"] < sc["turn_limit"] and (idx if cue == "repeat" else idx + 1) < len(sc["lines"]):
             # Unsure: answer what they said, then press on (or say the same thing again).
             opener = self.lines.opener(sc["lang"], cue, d["seed"] + d["turn"])
+            if not cue and not_blank:
+                opener = await self._improvise(sc, shown, d) or opener
             await self._say_caller(idx if cue == "repeat" else idx + 1, opener)
         else:
             await self._finish("wrap", outcome="protected", teacher="wrap")
@@ -507,6 +636,14 @@ class Engine:
             d["transcript"].append({"who": "teacher", "text": text})
             await self._send({"type": "teacher", "kind": teacher, "text": text, **extra})
         await self._stop_listening()
+        if outcome == "paused":  # never schedule more for someone a call upset
+            self._store({
+                "id": d["id"], "ts": datetime.now().isoformat(timespec="seconds"), "name": d["name"], "scenario_id": sc["id"],
+                "lang": sc["lang"], "ending": ending, "outcome": outcome, "line_reached": d["line_idx"] + 1,
+                "flags": list(d["flags"]), "next_dose": None,
+            })
+            await self._send({"type": "end", "ending": ending, "outcome": outcome})
+            return
         if outcome == "missed":
             nxt = {"kind": "booster", "scenario_id": sc["id"], "days": BOOSTER_DAYS}
         else:
@@ -519,11 +656,15 @@ class Engine:
             "name": d["name"], "scenario_id": sc["id"], "lang": sc["lang"],
             "ending": ending, "outcome": outcome, "line_reached": d["line_idx"] + 1,
             "flags": list(d["flags"]), "next_dose": nxt,
+            "decide_s": round(time.monotonic() - d["answered_at"], 1) if d.get("answered_at") else None,
         })
         await self._send({"type": "end", "ending": ending, "outcome": outcome})
 
     def median_latency(self) -> int | None:
         return int(statistics.median(self.latencies)) if self.latencies else None
+
+    def median_turn(self) -> int | None:
+        return int(statistics.median(self.turn_ms)) if self.turn_ms else None
 
     def notices(self) -> list:
         out = list(self.s.warnings) + list(CONTENT["warnings"]) + list(self.runtime_notices)
@@ -535,6 +676,13 @@ engine = Engine(load_settings(), ROOT / "results.json")
 # --------------------------------------------------------------------------- app
 app = FastAPI(title="Teeka")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+
+class PersonBody(BaseModel):
+    name: str
+    lang: str = "hi-IN"
+    consent: bool = False
+    code_word_set: bool = False  # only whether one exists: the word itself is never sent or kept
 
 
 class StartBody(BaseModel):
@@ -553,6 +701,21 @@ async def dashboard():
     return FileResponse(ROOT / "static" / "dashboard.html")
 
 
+@app.get("/people")
+async def people_page():
+    return FileResponse(ROOT / "static" / "people.html")
+
+
+@app.get("/library")
+async def library_page():
+    return FileResponse(ROOT / "static" / "library.html")
+
+
+@app.get("/reports")
+async def reports_page():
+    return FileResponse(ROOT / "static" / "reports.html")
+
+
 @app.get("/call")
 async def call_page():
     return FileResponse(ROOT / "static" / "call.html")
@@ -566,7 +729,7 @@ async def audio(name: str):
     path = engine.cache_dir / name
     if not _AUDIO_NAME.match(name) or not path.is_file():
         raise HTTPException(404, "No such audio")
-    return FileResponse(path, media_type="audio/wav")
+    return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @app.get("/api/scenarios")
@@ -596,7 +759,69 @@ async def state(name: str | None = None):
         "drill": engine.public_drill(),
         "card": engine.card(name),
         "median_latency_ms": engine.median_latency(),
+        "median_turn_ms": engine.median_turn(),
+        "consent_required": engine.consent_required,
+        "person": engine.read_people().get((name or "").strip()[:40]),
     }
+
+
+@app.get("/api/people")
+async def people():
+    rows = engine.read_results()
+    return [{**p, "doses": sum(r["name"] == p["name"] for r in rows)} for p in engine.read_people().values()]
+
+
+@app.post("/api/people")
+async def save_person(body: PersonBody):
+    name = body.name.strip()[:40]
+    if not name or body.lang not in CONTENT["languages"]:
+        raise HTTPException(400, "A name and a supported language are needed.")
+    return engine.save_person(name, body.lang, body.consent, body.code_word_set)
+
+
+@app.get("/api/reports")
+async def reports(name: str | None = None):
+    return engine.report(name)
+
+
+@app.get("/api/reports.csv")
+async def reports_csv():
+    """Outcomes only. People appear as numbers, so the file can be shared."""
+    out, ids = io.StringIO(), {}
+    w = csv.writer(out)
+    w.writerow(["date", "person", "language", "scam", "result", "caller_line_reached", "seconds_to_decide"])
+    for r in engine.read_results():
+        pid = ids.setdefault(r["name"], len(ids) + 1)
+        title = CONTENT["by_id"].get(r["scenario_id"], {}).get("title", r["scenario_id"])
+        w.writerow([r["ts"][:10], f"person-{pid}", r.get("lang", ""), title, r["outcome"], r.get("line_reached", ""), r.get("decide_s") if r.get("decide_s") is not None else ""])
+    return Response(out.getvalue(), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="teeka-results.csv"'})
+
+
+@app.get("/api/library")
+async def library(lang: str = "hi-IN"):
+    if not scenarios_in(lang):
+        raise HTTPException(404, "Unknown language")
+    items = []
+    for s in CONTENT["scenarios"]:
+        if s["lang"] != lang:
+            continue
+        flags = list(dict.fromkeys(f for line in s["lines"] for f in line["flags"]))
+        lessons = list(dict.fromkeys(line["lesson"] for line in s["lines"]))
+        items.append({"fraud": s["fraud"], "title": s["title"], "title_local": s["title_local"], "lang": lang,
+                      "practise": s["practise"], "flags": [flag_public(f, lang) for f in flags], "lessons": lessons})
+    return items
+
+
+@app.get("/api/next_dose.ics")
+async def next_dose_ics(name: str):
+    nd = engine.card(name).get("next_dose")
+    if not nd:
+        raise HTTPException(404, "No dose is scheduled")
+    day = nd["due"].replace("-", "")
+    body = "\r\n".join(["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Teeka//Next dose//EN", "BEGIN:VEVENT",
+                         f"UID:teeka-{day}-{abs(hash(name))}@teeka.local", f"DTSTAMP:{day}T000000Z", f"DTSTART;VALUE=DATE:{day}",
+                         "SUMMARY:Teeka: next practice call", "END:VEVENT", "END:VCALENDAR", ""])
+    return Response(body, media_type="text/calendar", headers={"Content-Disposition": 'attachment; filename="teeka-next-dose.ics"'})
 
 
 @app.post("/api/drills")

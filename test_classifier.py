@@ -16,7 +16,7 @@ REPORT_20 = [
     ("हाँ, ओटीपी आया है", c.COMPLYING),
     ("लिख लो, बताती हूँ", c.COMPLYING),
     ("ठीक है, लिंक खोल रही हूँ", c.COMPLYING),
-    ("कितने पैसे भेजने हैं?", c.COMPLYING),
+    ("कितने पैसे भेजने हैं?", c.UNSURE),  # changed on purpose: the caller now answers this
     ("हाँ, पिन डाल रही हूँ", c.COMPLYING),
     ("ऐप डाउनलोड कर लेती हूँ", c.COMPLYING),
     ("भेज दिया, देखिए", c.COMPLYING),

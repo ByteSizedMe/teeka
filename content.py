@@ -12,20 +12,23 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 import classifier
 
 CONTENT_ROOT = Path(__file__).parent / "content"
 
-TEMPLATE_KEYS = {"reveal_intro", "reveal_outro", "praise", "wrap", "code_word"}
-PHONE_KEYS = {"ringLabel", "declineLabel", "answerLabel", "endLabel", "endTitle", "done", "cancelled"}
+TEMPLATE_KEYS = {"reveal_intro", "reveal_outro", "praise", "wrap", "code_word", "comfort"}
+PHONE_KEYS = {"ringLabel", "declineLabel", "answerLabel", "endLabel", "endTitle", "done", "cancelled", "replayLabel", "slowLabel"}
 CUES = ("repeat", "wants_time", "asks_what", "confused")
+INTENTS = classifier.INTENTS
+FACT_KEYS = {"where_message": "where", "how_to_pay": "pay", "how_long": "deadline", "why_needed": "reason", "how_much": "money"}
 TTS_MODELS = ("timbre-v2.5", "timbre-v3.0")
 REVIEW_STATES = ("draft", "native_reviewed")
 VERDICTS = ("complying", "refusing", "unsure")
 DEFAULT_TURNS = 3
-MAX_TURNS = 5
+MAX_TURNS = 8
 MAX_LINE_CHARS = 230  # roughly 12 seconds when spoken, in every script tested
 
 # Matched after classifier.normalize. Latin terms match whole words; the rest match anywhere.
@@ -127,6 +130,13 @@ def _check_language(p: dict) -> None:
         _strings(p.get(key), key)
         for i, text in enumerate(p[key]):
             _spoken(text, f"{key}[{i}]")
+    for key in ("again", "filler"):
+        _strings(p.get(key), key)
+        for i, text in enumerate(p[key]):
+            _spoken(text, f"{key}[{i}]")
+    answers = p.get("answers") or {}
+    for intent in INTENTS:
+        _need(isinstance(answers.get(intent), dict) and answers[intent], f"answers.{intent} is missing")
     k = p.get("keywords") or {}
     _strings(k.get("comply"), "keywords.comply")
     _strings(k.get("resist"), "keywords.resist")
@@ -135,6 +145,9 @@ def _check_language(p: dict) -> None:
     _need(set(k.get("number_words") or {}) == set("0123456789"), "keywords.number_words must cover 0 to 9")
     for cue in CUES:
         _strings((k.get("unsure") or {}).get(cue), f"keywords.unsure.{cue}")
+    for intent in INTENTS:
+        _strings((k.get("asks") or {}).get(intent), f"keywords.asks.{intent}")
+    _strings(k.get("distress"), "keywords.distress")
     for row in p.get("test_replies") or []:
         _need(isinstance(row, list) and len(row) == 2 and row[1] in VERDICTS, "test_replies rows must be [text, verdict]")
 
@@ -151,6 +164,29 @@ def _check_scam_shape(p: dict) -> None:
     _need(isinstance(turns, int) and 1 <= turns <= MAX_TURNS, f"turn_limit must be 1 to {MAX_TURNS}")
     _need(isinstance(p.get("beats"), list) and p["beats"], "beats are missing")
     _need(isinstance(p.get("languages"), dict) and p["languages"], "languages are missing")
+
+
+def resolve_facts(p: dict, lang: str, lp: dict) -> dict:
+    """The answer choices one scam allows in one language: {intent: [sentences with slots]}."""
+    facts = p.get("facts") or {}
+    _need(facts, "facts are missing")
+    answers = lp["answers"]
+    out = {intent: answers[intent].get(facts[key]) for intent, key in FACT_KEYS.items()}
+    out["which_app"] = answers["which_app"].get("named" if facts.get("app") else "none")
+    out["who_are_you"] = answers["who_are_you"].get("any")
+    for intent, sentences in out.items():
+        _strings(sentences, f"answers.{intent} for this scam")
+    return out
+
+
+def fill_answer(text: str, p_facts: dict, lp: dict, slots: dict, seed: int) -> str:
+    """Put the drill's facts into an answer. A slot pool keeps the amount the same as the caller's lines."""
+    slot = p_facts.get("amount_slot")
+    if slot and slot in slots:
+        amount = slots[slot][seed % len(slots[slot])]
+    else:
+        amount = lp["amount_words"].get(p_facts.get("amount"), "")
+    return text.replace("{amount}", amount).replace("{app}", lp["app_names"].get(p_facts.get("app"), ""))
 
 
 def fill(text: str, orgs: list, slots: dict, seed: int) -> str:
@@ -187,13 +223,21 @@ def _build_scenario(p: dict, lang: str, lp: dict) -> dict:
                 _spoken(filled, f"{where}")
                 _need(len(filled) <= MAX_LINE_CHARS, f"{where} is too long to speak in about 12 seconds")
         lines.append({"variants": beat["variants"], "text": fill(beat["variants"][0], orgs, slots, 0), "flags": flags, "lesson": lesson})
+    answers = resolve_facts(p, lang, lp)
+    for intent, sentences in answers.items():
+        for text in sentences:
+            for n in range(max(1, *[len(v) for v in slots.values()] or [1])):
+                filled = fill_answer(text, p["facts"], lp, slots, n)
+                _spoken(filled, f"answer to {intent}")
+                _need("{" not in filled, f"answer to {intent} has an unfilled slot")
+                _need(len(filled) <= MAX_LINE_CHARS, f"answer to {intent} is too long")
     # A language can write fewer organisation names than the pack has caller ids.
     n_ids = len(orgs) if orgs else 1
     caller_ids = p["caller_ids"][:n_ids] or p["caller_ids"][:1]
     return {
         "id": f"{p['id']}-{lp['short']}", "fraud": p["id"], "lang": lang, "title": p["title"], "title_local": sec["title"],
         "practise": p["practise"], "caller_id": caller_ids[0], "caller_ids": caller_ids, "orgs": orgs, "slots": slots,
-        "turn_limit": p.get("turn_limit", DEFAULT_TURNS), "lines": lines,
+        "turn_limit": p.get("turn_limit", DEFAULT_TURNS), "lines": lines, "facts": p["facts"], "answers": answers,
     }
 
 
@@ -244,6 +288,25 @@ def load(root: Path | str | None = None) -> dict:
     return {"languages": languages, "scenarios": scenarios, "by_id": {s["id"]: s for s in scenarios}, "warnings": warnings}
 
 
+def line_is_safe(line, lang: str, languages: dict) -> bool:
+    """Everything a model writes must pass this before it can be spoken."""
+    if not isinstance(line, str) or not line.strip() or len(line) > MAX_LINE_CHARS:
+        return False
+    if any(ch.isdigit() for ch in line) or blocked_term(line) is not None or "{" in line:
+        return False
+    return _script_of(line) == _script_of(languages[lang]["templates"]["praise"])
+
+
+def _script_of(text: str) -> str:
+    """The Unicode block most letters in `text` belong to."""
+    counts: dict[str, int] = {}
+    for ch in text:
+        if ch.isalpha():
+            block = unicodedata.name(ch, "?").split(" ")[0]
+            counts[block] = counts.get(block, 0) + 1
+    return max(counts, key=counts.get) if counts else ""
+
+
 class PackLineSource:
     """Chooses what the caller says. Keep this interface if a model is ever added:
     plan() returns one drill's caller id and first choice of line per beat, and
@@ -269,6 +332,66 @@ class PackLineSource:
             texts.append(text)
         return {"caller_id": scenario["caller_ids"][seed % len(scenario["caller_ids"])], "lines": texts}
 
+    def answer(self, scenario: dict, intent: str, seed: int, said: set) -> str:
+        """Answer a question from this scam's facts. Never repeats itself word for word."""
+        lp = self.languages[scenario["lang"]]
+        sentences = [fill_answer(t, scenario["facts"], lp, scenario["slots"], seed) for t in scenario["answers"][intent]]
+        turn = len(said)
+        rotated = sentences[turn % len(sentences):] + sentences[:turn % len(sentences)]
+        again, press = lp["again"], lp["pressers"]
+        candidates = rotated + [f"{a} {t}" for a in again for t in rotated]
+        candidates += [f"{a} {t} {p}" for a in again for t in rotated for p in press]
+        candidates += [f"{p} {t}" for t in rotated for p in press]
+        for text in candidates:
+            if text not in said:
+                return text
+        return candidates[turn % len(candidates)]
+
+    def press(self, lang: str, seed: int, said: set) -> str:
+        """A short push when the beats have run out."""
+        pool = self.languages[lang]["pressers"]
+        return next((t for t in pool[seed % len(pool):] + pool[:seed % len(pool)] if t not in said), pool[seed % len(pool)])
+
+    def filler(self, lang: str, seed: int) -> str:
+        pool = self.languages[lang]["filler"]
+        return pool[seed % len(pool)]
+
+    async def improvise(self, scenario: dict, masked_reply: str, said: set) -> str | None:
+        """A model's answer to a reply the rules could not place, or None. Packs alone are the default."""
+        return None
+
+    def facts_for_prompt(self, scenario: dict, seed: int) -> dict:
+        lp = self.languages[scenario["lang"]]
+        return {k: fill_answer(v[0], scenario["facts"], lp, scenario["slots"], seed) for k, v in scenario["answers"].items()}
+
     def opener(self, lang: str, cue: str | None, seed: int) -> str:
         pool = self.languages[lang]["branches"].get(cue) if cue else None
         return pool[seed % len(pool)] if pool else ""
+
+
+class EvonLineSource(PackLineSource):
+    """PackLineSource plus your own Gnani Evon server at EVON_URL, for replies the rules could
+    not place. It only ever receives masked text. Gnani's docs do not define how Evon is
+    served, so this asks your server for an OpenAI-style chat response."""
+
+    def __init__(self, languages: dict, url: str):
+        super().__init__(languages)
+        self.url = url
+
+    def _messages(self, scenario: dict, masked_reply: str, said: set) -> list:
+        lang = self.languages[scenario["lang"]]["name"]
+        rules = ("You write one short line for a family fraud-safety training call. The caller is fictional. "
+                 f"Write in {lang}, in its own script, under 20 words, with numbers as words. Use only the approved facts below. "
+                 "Do not add new tricks, threats, organisations, phone numbers or links. "
+                 'Reply with JSON only: {"intent": "<short word>", "line": "<the line>"}. Approved facts: '
+                 + json.dumps(self.facts_for_prompt(scenario, 0), ensure_ascii=False) + " Already said: " + json.dumps(sorted(said)[-4:], ensure_ascii=False))
+        return [{"role": "system", "content": rules}, {"role": "user", "content": masked_reply}]
+
+    async def improvise(self, scenario: dict, masked_reply: str, said: set) -> str | None:
+        import httpx
+        async with httpx.AsyncClient(timeout=2.0) as http:
+            r = await http.post(self.url, json={"model": "evon", "temperature": 0.4, "messages": self._messages(scenario, masked_reply, said)})
+        r.raise_for_status()
+        body = json.loads(r.json()["choices"][0]["message"]["content"])
+        line = body.get("line")
+        return line.strip() if isinstance(line, str) else None

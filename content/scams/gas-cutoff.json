@@ -6,7 +6,7 @@
  "caller_ids": [
   "City Gas"
  ],
- "turn_limit": 3,
+ "turn_limit": 8,
  "beats": [
   {
    "flags": [
@@ -237,5 +237,15 @@
     }
    ]
   }
+ },
+ "facts": {
+  "where": "sms",
+  "app": null,
+  "money": "paid",
+  "amount": "five_hundred",
+  "amount_slot": null,
+  "pay": "upi",
+  "deadline": "today",
+  "reason": "clear_bill"
  }
 }

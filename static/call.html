@@ -63,6 +63,11 @@
   #mock button { flex: 1; min-height: 48px; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: #fff; font: inherit; cursor: pointer; }
   #err { position: fixed; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top)); z-index: 5; padding: 10px 14px; border-radius: 10px; background: #3b1a14; color: var(--warn); border: 1px solid var(--warn); font-size: 1rem; text-align: center; }
   #err:empty { display: none; }
+  .after { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
+  .ghost { min-height: 56px; width: 100%; max-width: 320px; padding: 10px 20px; border-radius: 28px; border: 1px solid var(--line); background: var(--surface); color: #fff; font: inherit; cursor: pointer; }
+  .ghost[aria-pressed="true"] { border-color: var(--mint); color: var(--mint); }
+  .switch { display: flex; align-items: center; gap: 10px; color: var(--soft); }
+  .switch input { width: 22px; height: 22px; accent-color: var(--mint); }
 
   @media (max-height: 720px) {
     .screen { padding-top: calc(18px + env(safe-area-inset-top)); padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
@@ -97,6 +102,7 @@
       <h1 class="title">Ready</h1>
       <p class="sub">Waiting for a practice call. Keep this page open.</p>
       <span id="mockTag" class="tag" hidden>Mock mode</span>
+      <label class="switch"><input id="phoneSound" type="checkbox"> Phone-line sound</label>
     </div>
   </div>
 
@@ -145,6 +151,7 @@
       <h1 class="title" id="endTitle">Call ended</h1>
       <p class="sub" id="endMsg">That was only a practice call. Nothing was real, and you are safe.</p>
     </div>
+    <div class="after"><button id="replayBtn" class="ghost" hidden>Hear it again</button><button id="slowBtn" class="ghost" aria-pressed="false">Slower voice</button></div>
   </div>
   <div id="err" role="alert"></div>
 
@@ -183,6 +190,8 @@ let words = { done: 'That was only a practice call. Nothing was real, and you ar
 function setCallLanguage(labels, lang) {
   if (!labels) return;
   words = labels;
+  $('replayBtn').textContent = labels.replayLabel || $('replayBtn').textContent;
+  $('slowBtn').textContent = labels.slowLabel || $('slowBtn').textContent;
   if (lang) document.documentElement.lang = lang;
   for (const id of ['ringLabel', 'declineLabel', 'answerLabel', 'endLabel', 'endTitle']) $(id).textContent = labels[id];
   $('endMsg').textContent = labels.done;
@@ -213,6 +222,51 @@ function stopRing() {
 }
 
 // ---- caller / teacher audio (server sends audio_url once Timbre is on) ----
+// ---- slower voice, lesson replay, optional phone-line sound ----
+let slow = false, lesson = [], fx = null;
+try { slow = localStorage.getItem('teeka-slow') === '1'; } catch (e) {}
+function applySpeed() {
+  const rate = slow ? 0.85 : 1;
+  player.defaultPlaybackRate = rate; player.playbackRate = rate;
+  $('slowBtn').setAttribute('aria-pressed', String(slow));
+}
+function playLesson() {
+  if (!lesson.length) return;
+  clearTimeout(endedTimer);
+  const queue = lesson.slice();
+  const next = () => {
+    const url = queue.shift();
+    if (!url) { armEndedTimer(); return; }
+    player.src = url; applySpeed(); player.onended = next; player.onerror = next;
+    player.play().catch(next);
+  };
+  next();
+}
+// Band-limits only what the person hears. Prisma's audio comes from the mic and is untouched.
+function setPhoneSound(on) {
+  if (!audioCtx) return;
+  if (!fx) {
+    const src = audioCtx.createMediaElementSource(player);
+    const hp = audioCtx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 300;
+    const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3400;
+    const direct = audioCtx.createGain(), line = audioCtx.createGain();
+    src.connect(direct); direct.connect(audioCtx.destination);
+    src.connect(hp); hp.connect(lp); lp.connect(line); line.connect(audioCtx.destination);
+    const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const noise = audioCtx.createBufferSource(); noise.buffer = buf; noise.loop = true;
+    const room = audioCtx.createGain(); noise.connect(room); room.connect(audioCtx.destination); noise.start();
+    fx = { direct, line, room };
+  }
+  fx.direct.gain.value = on ? 0 : 1; fx.line.gain.value = on ? 1 : 0; fx.room.gain.value = 0; fx.on = on;
+}
+function roomTone(on) { if (fx && fx.on) fx.room.gain.value = on ? 0.006 : 0; }
+function armEndedTimer() {
+  clearTimeout(endedTimer);
+  endedTimer = setTimeout(() => { if ($('ended').classList.contains('on')) show('waiting'); }, lesson.length ? 20000 : 6000);
+}
+
 function resetAudio() {
   playToken++; playing = false; endAfterPlay = false; playQueue = [];
   player.onended = player.onerror = null;
@@ -224,7 +278,7 @@ function playNext() {
   if (!item) { if (endAfterPlay) { endAfterPlay = false; finishCall(); } return; }
   playing = true;
   const me = ++playToken;
-  player.src = item.url;
+  player.src = item.url; applySpeed();
   send({ type: 'playback_start' });
   const done = () => { if (me !== playToken) return; playing = false; send({ type: 'playback_end' }); playNext(); };
   const failed = (e) => {
@@ -268,8 +322,9 @@ function stopMic() {
 function finishCall() {
   stopMic(); stopRing(); clearInterval(timerIv);
   show('ended');
-  clearTimeout(endedTimer);
-  endedTimer = setTimeout(() => { if ($('ended').classList.contains('on')) show('waiting'); }, 6000);
+  roomTone(false);
+  $('replayBtn').hidden = !lesson.length;
+  armEndedTimer();
 }
 
 function tick() {
@@ -282,14 +337,20 @@ function onMsg(m) {
     cfg = m; $('mockTag').hidden = !m.mock; $('mock').classList.toggle('on', !!m.mock);
   } else if (m.type === 'ring') {
     $('callerId').textContent = $('callerId2').textContent = m.caller_id;
-    resetAudio(); clearTimeout(endedTimer); setCallLanguage(m.labels, m.lang);
+    resetAudio(); clearTimeout(endedTimer); lesson = []; setCallLanguage(m.labels, m.lang);
     if (audioCtx) audioCtx.resume().catch(() => {});
     show('ringing'); startRing(); err('');
   } else if (m.type === 'caller' || m.type === 'teacher') {
+    if (m.type === 'teacher' && m.audio_url) lesson = [m.audio_url];
     if (m.audio_url) playQueue.push({ url: m.audio_url, text: m.text });
+    (m.more || []).forEach((url) => playQueue.push({ url, text: m.text }));
     // Words are shown only when there is no voice (mock mode, or Timbre failed).
     if (cfg.mock || !m.audio_url) $('subtitle').textContent = m.text;
     if (m.audio_url) playNext();
+  } else if (m.type === 'filler') {
+    if (m.audio_url) { playQueue.push({ url: m.audio_url, text: '' }); playNext(); }
+  } else if (m.type === 'prefetch') {
+    (m.urls || []).forEach((u) => fetch(u).catch(() => {})); // into the browser cache, so the voice starts at once
   } else if (m.type === 'end') {
     if (!document.querySelector('#ringing.on, #incall.on')) return; // already hung up here
     stopRing(); stopMic();
@@ -328,15 +389,21 @@ $('setupBtn').onclick = async () => {
     } catch (e) { err(micMessage(e)); $('setupBtn').disabled = false; return; }
   }
   keepAwake();
+  if ($('phoneSound').checked) setPhoneSound(true);
   show('waiting'); connect();
 };
 $('answerBtn').onclick = async () => {
   audioCtx.resume().catch(() => {}); unlockPlayer();
-  stopRing(); send({ type: 'answer' }); show('incall');
+  stopRing(); send({ type: 'answer' }); show('incall'); roomTone(true);
   callStart = Date.now(); clearInterval(timerIv); timerIv = setInterval(tick, 500); tick();
   $('subtitle').textContent = '';
   await startMic();
 };
+$('replayBtn').onclick = playLesson;
+$('slowBtn').onclick = () => { slow = !slow; try { localStorage.setItem('teeka-slow', slow ? '1' : '0'); } catch (e) {} applySpeed(); };
+try { $('phoneSound').checked = localStorage.getItem('teeka-phone-sound') === '1'; } catch (e) {}
+$('phoneSound').onchange = () => { try { localStorage.setItem('teeka-phone-sound', $('phoneSound').checked ? '1' : '0'); } catch (e) {} setPhoneSound($('phoneSound').checked); };
+applySpeed();
 $('declineBtn').onclick = () => { stopRing(); send({ type: 'decline' }); };
 $('endBtn').onclick = () => { send({ type: 'hangup' }); resetAudio(); finishCall(); };
 $('sendBtn').onclick = () => { const t = $('replyText').value; $('replyText').value = ''; send({ type: 'reply', text: t }); };

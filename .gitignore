@@ -6,6 +6,7 @@ venv/
 __pycache__/
 *.pyc
 results.json
+people.json
 cache/
 *.wav
 *.mp3

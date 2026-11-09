@@ -11,6 +11,11 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+<div class="stage">
+<aside class="rail" aria-label="Family">
+  <section><h3>People</h3><ul id="railPeople"></ul><p><a href="/people">Manage people</a></p></section>
+  <section><h3>Immunity score</h3><span id="railImmunity" class="immunity-num">–</span><p class="muted small">Share of their last 10 practice calls they refused or hung up on. <a href="/reports">Reports</a></p></section>
+</aside>
 <div class="wrap">
   <header class="top">
     <div class="brand">
@@ -20,6 +25,7 @@
         <p class="kicker">Scam-call vaccination card</p>
       </div>
     </div>
+    <nav id="nav" class="nav" aria-label="Main"></nav>
     <div class="meters">
       <span id="modePill" class="pill">…</span>
       <span id="phonePill" class="pill off">Phone: not connected</span>
@@ -33,9 +39,9 @@
       <h2>Start a practice call</h2>
       <label for="name">Who is practising?</label>
       <input id="name" maxlength="40" placeholder="e.g. Kamla" autocomplete="off">
+      <label id="consentRow" class="check" hidden><input id="consent" type="checkbox"> They agreed in advance to occasional practice calls</label>
       <label for="language">Their language</label>
       <select id="language"></select>
-      <p id="draftTag" class="draft" hidden>Draft language: needs a native speaker's check</p>
       <label for="scenario">Scam</label>
       <select id="scenario"></select>
       <p id="practise" class="muted"></p>
@@ -48,7 +54,7 @@
     </section>
 
     <section class="card live">
-      <h2>Live call <span id="liveDraft" class="draft" hidden>Draft language</span></h2>
+      <h2>Live call</h2>
       <div id="status" class="muted">No call yet.</div>
       <div id="chips" class="chips"></div>
       <div id="stampBox"></div>
@@ -64,8 +70,14 @@
       <table id="history"><thead><tr><th>Date</th><th>Scam</th><th>Result</th></tr></thead><tbody></tbody></table>
     </section>
   </div>
-  <p class="foot">Role-played demo. All names, numbers and organisations are fictional.</p>
 </div>
+<aside class="rail" aria-label="Learn">
+  <section><h3>Red flags to work on</h3><div id="railFlags"></div></section>
+  <section><h3>Scam library</h3><ul id="railLibrary"></ul><p><a href="/library">See all</a></p></section>
+  <section id="railHelp"></section>
+</aside>
+</div>
+<script src="/static/app.js"></script>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -94,6 +106,10 @@ async function init() {
   $('language').onchange = fillScams;
   $('scenario').onchange = showPractise;
   fillScams();
+  fillRailLibrary();
+  $('language').addEventListener('change', fillRailLibrary);
+  Teeka.nav();
+  Teeka.helpCard($('railHelp'));
   $('start').onclick = startDrill;
   $('stop').onclick = async () => { await api('/api/drills/stop', { method: 'POST' }); refresh(); };
   refresh();
@@ -110,8 +126,6 @@ function fillScams() {
     return o;
   }));
   if (mine.length) $('scenario').value = mine[0].id;
-  const pack = languages.find((l) => l.lang === lang);
-  $('draftTag').hidden = !(pack && pack.draft);
   try { localStorage.setItem('teeka-lang', lang); } catch (e) {}
   showPractise();
 }
@@ -126,6 +140,11 @@ async function startDrill() {
   if (!phoneConnected) { $('startMsg').textContent = 'No phone is connected. Open /call on the phone and tap “Set up this phone” first.'; return; }
   try {
     try { localStorage.setItem('teeka-name', $('name').value); } catch (e) {}
+    if (!$('consentRow').hidden) {
+      if (!$('consent').checked) { $('startMsg').textContent = 'Please confirm they agreed in advance to practice calls.'; return; }
+      await Teeka.post('/api/people', { name: $('name').value, lang: $('language').value, consent: true, code_word_set: false });
+      $('consent').checked = false; $('consentRow').hidden = true;
+    }
     await api('/api/drills', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scenario_id: $('scenario').value, name: $('name').value, lang: $('language').value }) });
   } catch (e) { $('startMsg').textContent = e.message; }
@@ -192,13 +211,19 @@ function renderCard(c) {
   });
   while (marks.length < DOSE_SLOTS) marks.push(el('span', 'dot empty'));
   $('dots').replaceChildren(...marks);
+  loadRails(c.name);
   $('cardSummary').textContent = c.doses ? `${c.doses} dose${c.doses > 1 ? 's' : ''}, ${c.protected} protected` : 'No doses yet.';
   const nd = c.next_dose;
   $('nextDose').replaceChildren(...(nd ? [
     el('span', 'nd-label', 'Next dose due'),
     el('span', 'nd-date', shortDate(nd.due)),
     el('span', 'nd-what', nd.kind === 'booster' ? `A booster of “${nd.title}”, in ${nd.days} days` : `“${nd.title}”, in ${nd.days} days`),
-    Object.assign(el('button', 'dose-go', 'Start this dose'), { id: 'startDose', onclick: () => startDose(nd) }),
+    (() => {
+      const row = el('span', 'dose-actions');
+      const cal = Object.assign(el('a', null, 'Add to calendar'), { href: '/api/next_dose.ics?name=' + encodeURIComponent(c.name) });
+      row.append(Object.assign(el('button', 'dose-go', 'Start this dose'), { id: 'startDose', onclick: () => startDose(nd) }), cal);
+      return row;
+    })(),
   ] : []));
   const tb = document.querySelector('#history tbody');
   tb.replaceChildren(...c.history.slice().reverse().map((h) => {
@@ -217,7 +242,8 @@ function render(st) {
   phoneConnected = st.phone_connected;
   $('phonePill').textContent = st.phone_connected ? 'Phone: connected' : 'Phone: not connected';
   $('phonePill').className = 'pill' + (st.phone_connected ? '' : ' off');
-  $('latency').textContent = st.median_latency_ms != null ? `Median Prisma latency: ${st.median_latency_ms} ms` : '';
+  $('latency').textContent = [st.median_latency_ms != null ? `Prisma ${st.median_latency_ms} ms` : '', st.median_turn_ms != null ? `Reply to voice ${st.median_turn_ms} ms` : ''].filter(Boolean).join(' · ');
+  $('consentRow').hidden = !st.consent_required || !$('name').value.trim() || !!(st.person && st.person.consent);
   syncList($('notices'), st.notices, (t) => t, (t) => el('div', 'notice', t));
 
   const d = st.drill;
@@ -225,7 +251,6 @@ function render(st) {
   $('start').disabled = !!busy;
   $('stop').disabled = !busy;
   $('status').dataset.state = d ? d.status : '';
-  $('liveDraft').hidden = !(d && d.draft_language);
   syncList($('chips'), d ? d.flags : [], (f) => `${d.id}:${f.id}`, (f) => el('span', 'chip', f.en === f.local ? f.en : `${f.en} · ${f.local}`));
   syncList($('stampBox'), d && d.stamp ? [d] : [], (x) => `${x.id}:${x.outcome}`, (x) => {
     const s = el('div', 'stamp ' + x.outcome, x.stamp);
@@ -249,6 +274,24 @@ function render(st) {
   });
   if (added) $('transcript').scrollTop = $('transcript').scrollHeight;
   renderCard(st.card);
+}
+
+async function loadRails(name) {
+  const [people, rep] = await Promise.all([api('/api/people'), api('/api/reports' + (name ? '?name=' + encodeURIComponent(name) : ''))]);
+  $('railPeople').replaceChildren(...(people.length ? people.map((p) => {
+    const li = el('li'), b = el('button', p.name === name ? 'on' : '', p.name);
+    b.onclick = () => { $('name').value = p.name; if (languages.some((l) => l.lang === p.lang)) { $('language').value = p.lang; fillScams(); } refresh(); };
+    li.append(b); return li;
+  }) : [el('li', 'muted', 'Nobody added yet.')]));
+  $('railImmunity').textContent = rep.immunity == null ? '–' : `${rep.immunity}%`;
+  Teeka.bars($('railFlags'), Teeka.flagRows(rep.flags).slice(0, 5), 'Appears after their first practice call.');
+}
+
+function fillRailLibrary() {
+  const lang = $('language').value;
+  $('railLibrary').replaceChildren(...scenarios.filter((s) => s.lang === lang).slice(0, 5).map((s) => {
+    const li = el('li'); li.append(Object.assign(el('a', null, s.title), { href: '/library#' + s.fraud })); return li;
+  }));
 }
 
 async function refresh() {

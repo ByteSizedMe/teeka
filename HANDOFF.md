@@ -1,6 +1,13 @@
 # Teeka handoff
 
-## Content packs (latest)
+## Conversation and features (latest)
+- The caller answers questions from each scam's facts, up to 8 lines. Distress ends the call kindly. Consent is required before a call.
+- New pages: `/people`, `/library`, `/reports`. Dashboard shows immunity, red flags, help card and side rails on wide screens.
+- `median_turn_ms` on the dashboard is real: end of the person's speech to the caller's first sound.
+- Not yet tuned: `GRACE_S`, `GATE_TAIL_S` and the v2.5 versus v3.0 choice. These need live runs with `test_replies.py`.
+- Regional languages have one written answer per fact, with rephrasing on repeat. Hindi and English have two.
+
+## Content packs
 - 15 fraud types in the 10 languages Gnani supports for both Prisma and Timbre, in `content/`. `content.py` validates them at startup.
 - All packs have `"review": "draft"`. A native speaker must check each one, then change it to `native_reviewed`.
 - Hindi and English have two written sentences per beat. The other eight have one, varied by interchangeable opening and closing sentences.

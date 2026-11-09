@@ -6,7 +6,7 @@
  "caller_ids": [
   "ABC Telecom"
  ],
- "turn_limit": 3,
+ "turn_limit": 8,
  "beats": [
   {
    "flags": [
@@ -237,5 +237,15 @@
     }
    ]
   }
+ },
+ "facts": {
+  "where": "sms",
+  "app": "abc_help",
+  "money": "otp_only",
+  "amount": null,
+  "amount_slot": null,
+  "pay": "none",
+  "deadline": "two_hours",
+  "reason": "verify"
  }
 }

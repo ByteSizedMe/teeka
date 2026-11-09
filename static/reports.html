@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teeka reports</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;700;800&family=Tiro+Devanagari+Hindi&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap page">
+  <header class="top">
+    <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+      <div><h1>Teeka <span lang="hi">टीका</span></h1><p class="kicker">Scam-call vaccination card</p></div></div>
+    <nav id="nav" class="nav" aria-label="Main"></nav>
+  </header>
+  <section class="card">
+    <div class="titlebar"><h2>Reports</h2>
+      <div class="inline-field"><label for="who">Showing</label><select id="who"></select></div></div>
+    <div class="tiles">
+      <div class="tile"><span class="tile-label">Immunity score</span><b id="immunity">–</b><small>Share of the last 10 practice calls they refused or hung up on</small></div>
+      <div class="tile"><span class="tile-label">Doses</span><b id="doses">–</b><small><span id="protected">0</span> protected</small></div>
+      <div class="tile"><span class="tile-label">Median time to refuse</span><b id="refuse">–</b><small>From answering to saying no</small></div>
+    </div>
+    <div class="row"><button id="cert" class="primary">Download certificate</button><a id="csv" class="btn" href="/api/reports.csv">Export CSV</a></div>
+    <p class="muted small">The certificate holds no name and nothing said on a call.</p>
+  </section>
+  <div class="page-grid">
+    <section class="card"><h2>Red flags that fooled them</h2><div id="flags"></div></section>
+    <section class="card"><h2>Refused, by dose</h2><div id="byDose" class="good"></div></section>
+    <section class="card"><h2>Pilot cohort</h2><p class="muted small">For a bank or group running drills at scale.</p><div id="cohort"></div></section>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+<script>
+const { $, el, api, nav, bars, flagRows, certificate } = Teeka;
+let last;
+
+function table(box, heads, rows, empty) {
+  if (!rows.length) { box.replaceChildren(el('p', 'muted', empty)); return; }
+  const t = el('table'), head = el('tr');
+  heads.forEach((h) => head.append(el('th', null, h)));
+  const th = el('thead'); th.append(head); const tb = el('tbody');
+  rows.forEach((r) => { const tr = el('tr'); r.forEach((c) => tr.append(el('td', null, String(c)))); tb.append(tr); });
+  t.append(th, tb); box.replaceChildren(t);
+}
+
+async function draw() {
+  const who = $('who').value;
+  last = await api('/api/reports' + (who ? '?name=' + encodeURIComponent(who) : ''));
+  $('immunity').textContent = last.immunity == null ? '–' : `${last.immunity}%`;
+  $('doses').textContent = last.doses; $('protected').textContent = last.protected;
+  $('refuse').textContent = last.median_refuse_s == null ? '–' : `${last.median_refuse_s} s`;
+  $('cert').disabled = !last.doses;
+  bars($('flags'), flagRows(last.flags), 'No results yet.');
+  bars($('byDose'), last.by_dose.map((d) => ({ label: `Dose ${d.dose}`, pct: d.pct, title: `${d.passed} of ${d.total} refused` })), 'No results yet.');
+  table($('cohort'), ['Language', 'People', 'Doses', 'Refused'], last.cohort.map((c) => [c.name, c.people, c.doses, `${c.pct}%`]), 'No results yet. Results appear here after real practice calls.');
+}
+
+(async () => {
+  nav();
+  const people = await api('/api/people');
+  const all = el('option', null, 'Everyone'); all.value = '';
+  $('who').replaceChildren(all, ...people.map((p) => { const o = el('option', null, p.name); o.value = p.name; return o; }));
+  const q = new URLSearchParams(location.search).get('name');
+  if (q && people.some((p) => p.name === q)) $('who').value = q;
+  $('who').onchange = draw;
+  $('cert').onclick = () => certificate(last);
+  draw();
+})();
+</script>
+</body>
+</html>

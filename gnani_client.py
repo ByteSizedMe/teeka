@@ -178,6 +178,9 @@ class GnaniClient:
         key = json.dumps([model, voice, language, sample_rate, speed, text], ensure_ascii=False)
         return self.cache_dir / (hashlib.sha256(key.encode("utf-8")).hexdigest() + ".wav")
 
+    def is_cached(self, text, voice, language, model, sample_rate=24000, speed=1.0) -> bool:
+        return self.cache_path(text, voice, language, model, sample_rate, speed).exists()
+
     async def tts(self, text, voice, language, model, sample_rate=24000, speed=1.0) -> Path:
         """Speak `text`; returns the cached WAV path. Only a cache miss costs credits."""
         path = self.cache_path(text, voice, language, model, sample_rate, speed)

@@ -6,7 +6,7 @@
  "caller_ids": [
   "Lucky Prize Desk"
  ],
- "turn_limit": 3,
+ "turn_limit": 8,
  "beats": [
   {
    "flags": [
@@ -256,5 +256,15 @@
     }
    ]
   }
+ },
+ "facts": {
+  "where": "sms",
+  "app": null,
+  "money": "paid",
+  "amount": "three_thousand",
+  "amount_slot": "fee",
+  "pay": "transfer",
+  "deadline": "today",
+  "reason": "release"
  }
 }

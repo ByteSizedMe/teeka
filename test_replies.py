@@ -35,7 +35,7 @@ PHRASES = [
     ("हाँ, ओटीपी आया है", "complying"),
     ("लिख लो, बताती हूँ", "complying"),
     ("ठीक है, लिंक खोल रही हूँ", "complying"),
-    ("कितने पैसे भेजने हैं?", "complying"),
+    ("कितने पैसे भेजने हैं?", "unsure"),  # changed on purpose: the caller now answers this
     ("हाँ, पिन डाल रही हूँ", "complying"),
     ("ऐप डाउनलोड कर लेती हूँ", "complying"),
     ("भेज दिया, देखिए", "complying"),

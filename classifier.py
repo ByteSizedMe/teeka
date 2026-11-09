@@ -25,6 +25,7 @@ NEGATION_WINDOW = 2  # tokens beside a complying phrase that can flip it
 MIN_DIGITS = 3
 ENGLISH = "en-IN"
 DEFAULT_LANG = "hi-IN"
+INTENTS = ("where_message", "which_app", "how_much", "how_to_pay", "who_are_you", "why_needed", "how_long")
 CUE_ORDER = ("repeat", "wants_time", "asks_what", "confused")
 
 _NUKTAS = "़়਼઼଼"
@@ -65,6 +66,8 @@ class _Rules:
     numbers: dict
     directions: dict  # complying phrase -> where its negator sits
     cues: dict  # cue -> tuple of phrases
+    asks: dict  # question intent -> tuple of phrases
+    distress: tuple
 
 
 def _phrases(values) -> set:
@@ -103,6 +106,8 @@ def _rules(lang: str | None) -> _Rules:
         return _cache[lang]
     comply, resist, negators, numbers, directions = set(), set(), set(), {}, {}
     cues: dict[str, set] = {c: set() for c in CUE_ORDER}
+    asks: dict[str, set] = {i: set() for i in INTENTS}
+    distress: set = set()
     # English first, so the call's own language decides any phrase both define.
     for code in [c for c in (ENGLISH, lang) if c in _blocks]:
         block = _blocks[code]
@@ -119,8 +124,11 @@ def _rules(lang: str | None) -> _Rules:
                     numbers[tok] = digit
         for cue in CUE_ORDER:
             cues[cue] |= _phrases(block.get("unsure", {}).get(cue, []))
+        for intent in INTENTS:
+            asks[intent] |= _phrases(block.get("asks", {}).get(intent, []))
+        distress |= _phrases(block.get("distress", []))
     built = _Rules(tuple(comply), tuple(resist), frozenset(negators), numbers, directions,
-                   {c: tuple(v) for c, v in cues.items()})
+                   {c: tuple(v) for c, v in cues.items()}, {i: tuple(v) for i, v in asks.items()}, tuple(distress))
     _cache[lang] = built
     return built
 
@@ -168,8 +176,15 @@ def classify_detail(text: str, lang: str = DEFAULT_LANG) -> dict:
     if _find_digit_run(tokens, rules.numbers):
         return {"label": COMPLYING, "reason": "three digits in a row"}
 
+    # A question is not a commitment: "which app do I download?" must not stop the call.
+    # Digits were checked above, so nothing that shares a code can get past this.
+    asked = set()
+    for phrases in rules.asks.values():
+        for s, e, _ in _spans(tokens, phrases):
+            asked |= set(range(s, e))
+
     # (start, end, polarity, phrase)
-    found = [(s, e, "c", ph) for s, e, ph in _spans(tokens, rules.comply)]
+    found = [(s, e, "c", ph) for s, e, ph in _spans(tokens, rules.comply) if not (set(range(s, e)) & asked) and s - 1 not in asked]
     found += [(s, e, "r", ph) for s, e, ph in _spans(tokens, rules.resist)]
 
     # Longest match wins where matches overlap.
@@ -183,7 +198,7 @@ def classify_detail(text: str, lang: str = DEFAULT_LANG) -> dict:
         used |= span
 
     # "I don't understand" is confusion, not a refusal: its negator does not count.
-    in_a_cue = set()
+    in_a_cue = set(asked)
     for phrases in rules.cues.values():
         for s, e, _ in _spans(tokens, phrases):
             in_a_cue |= set(range(s, e))
@@ -223,10 +238,18 @@ def classify(text: str, lang: str = DEFAULT_LANG) -> str:
     return classify_detail(text, lang)["label"]
 
 
+def is_distress(text: str, lang: str = DEFAULT_LANG) -> bool:
+    """The person is upset or asked to stop: the drill ends at once, kindly."""
+    return bool(_spans(tokenize(text), _rules(lang).distress))
+
+
 def unsure_reason(text: str, lang: str = DEFAULT_LANG) -> str | None:
-    """Why an unsure reply is unsure: repeat, wants_time, asks_what, confused, or None."""
+    """Why an unsure reply is unsure: a question intent, repeat, wants_time, asks_what, confused, or None."""
     tokens = tokenize(text)
     rules = _rules(lang)
+    for intent in INTENTS:
+        if _spans(tokens, rules.asks[intent]):
+            return intent
     for cue in CUE_ORDER:
         if _spans(tokens, rules.cues[cue]):
             return cue
