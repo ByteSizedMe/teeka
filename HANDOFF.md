@@ -1,0 +1,35 @@
+# Teeka handoff
+
+## Done (stages 1-8)
+- Classifier, scenarios, keywords: 20/20 report phrases as text.
+- Server, dashboard, phone page: mock mode and live mode. 12 server tests pass.
+- Live Gnani: cached Timbre, Prisma stream with REST fallback, mic gate, voice cloning with Timbre fallback.
+- `test_mic_gate.py` (10 offline + live A/B) and `test_replies.py` pass. README is written.
+
+## Not done
+- Nothing is half-built. The commit plan is in the chat. I ran no git commands.
+
+## Run
+    .venv\Scripts\activate ; set PYTHONUTF8=1
+    python test_classifier.py ; python test_server.py ; python test_mic_gate.py --no-live
+    uvicorn server:app --host 0.0.0.0 --port 8000
+- Dashboard `/dashboard`; phone `/call`, then "Set up this phone". Empty key = mock mode.
+- Live tests: `python test_mic_gate.py`, `python test_replies.py [--model prisma-v3.0] [--snr 10] [--voice Deepak]`.
+
+## Known issues
+- Reply scores (20/20) use synthetic Timbre speech. Quote only your own TV test.
+- Keywords were tuned on Nalini's output; a second voice (Deepak) also scored 20/20.
+- Roman "do", "no", "sat", "oh" are not number words. The digit rule always wins, even in a refusal.
+- Wrap-up, hangup and decline are all stamped Protected. That is my reading of the report.
+- Teacher reveal audio is about 21 s (23 s cloned). Consider trimming `reveal_outro`.
+- Prisma v2.5 never sent the documented `processing` event. Timbre WAV headers needed repair (`fix_wav`).
+- One phone and one drill at a time. No login. The 0.5 s gate tail is a guess.
+- `STT_MODEL` in `.env` is your choice; v3.0 was faster and equally accurate on my runs.
+
+## Test by hand
+- Open both pages in a real browser, then a real phone over the HTTPS tunnel with the TV on.
+- Check the caller's voice never shows up as a reply on a real speaker.
+- Listen to every Timbre line. Have a Hindi speaker rewrite any that sound off.
+- Record 15-25 s of YOUR OWN voice, set `FAMILY_VOICE_FILE`, run a drill, listen to it.
+- Run the report's TV test with a real person; quote only that score.
+- Before every commit run `git status` and confirm `.env`, `results.json`, `cache/`, audio and `family_voice*` are not listed.
