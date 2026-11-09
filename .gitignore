@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+results.json
+cache/
+*.wav
+*.mp3
+*.webm
+family_voice*
+.DS_Store
